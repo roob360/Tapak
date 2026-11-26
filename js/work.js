@@ -127,10 +127,11 @@ async function usePdf(bytes) {
   S.names = await S.view.names();
   bitmaps.clear();
 }
+const LIGHT = matchMedia('(pointer: coarse)').matches; // tablet dan HP
 async function bitmapOf(i) {
   if (!bitmaps.has(i)) {
-    if (bitmaps.size >= 3) bitmaps.delete(bitmaps.keys().next().value); // hemat memori di tablet
-    bitmaps.set(i, await S.view.render(i));
+    if (bitmaps.size >= (LIGHT ? 2 : 3)) bitmaps.delete(bitmaps.keys().next().value); // hemat memori di tablet
+    bitmaps.set(i, await S.view.render(i, LIGHT ? 2400 : 3200));
   }
   return bitmaps.get(i);
 }
@@ -735,7 +736,7 @@ const handlers = {
     board?.redraw();
   },
   preview(p) { S.cursor = constrain(p, anchor()); return S.cursor; },
-  hover(p) { pointerAt = p; updateCursor(); if (S.draft.length) { S.cursor = constrain(p, anchor()); board.redraw(); } },
+  hover(p) { pointerAt = p; updateCursor(); if (S.draft.length) { S.cursor = constrain(p, anchor()); board.overlay(); } }, // garis sementara ada di lapisan atas
   double() { if (S.draft.length > 1) finishDraft(); },
   async tap(p, type) {
     if (S.found) {

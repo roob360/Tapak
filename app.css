@@ -245,4 +245,9 @@ td .meter { width: 90px; margin-top: 4px; }
   #work.lefty #hint { left: 8px; right: 76px; }
   #toast { bottom: calc(206px + env(safe-area-inset-bottom)); }
 }
+/* tablet dan HP: kaca buram di atas kanvas sangat berat, diganti warna padat */
+@media (pointer: coarse) {
+  .glass, #toast { backdrop-filter: none; -webkit-backdrop-filter: none; background: var(--surf); box-shadow: 0 2px 8px #0000001f; }
+  .scrim { backdrop-filter: none; -webkit-backdrop-filter: none; }
+}
 @media (prefers-reduced-motion: reduce) { * { transition-duration: 0s !important; } }

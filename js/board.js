@@ -7,9 +7,13 @@ export function createBoard(canvas, h) {
   const g = canvas.getContext('2d');
   const view = { k: 1, x: 0, y: 0 };
   const pointers = new Map();
-  let image = null, size = [1, 1], fitK = 1, act = null, hold = 0, penDown = null, queued = false, anim = 0, gesture = null, cache = null;
+  let image = null, size = [1, 1], fitK = 1, act = null, hold = 0, penDown = null, queued = false, anim = 0, gesture = null;
+  // salinan gambar dasar: `cache` = dikunci selama goresan, `fresh` = masih sama dengan isi layar
+  let held = null, cache = false, fresh = false, wantCopy = false;
   const state = { penSeen: false, finger: false, loupe: null, aim: null, still: false, add: false, space: false };
-  const dpr = () => Math.min(2, window.devicePixelRatio || 1);
+  // di tablet dan HP resolusi kanvas dibatasi: piksel jauh lebih sedikit, beda tajamnya hampir tak terlihat
+  const maxDpr = matchMedia('(pointer: coarse)').matches ? 1.5 : 2;
+  const dpr = () => Math.min(maxDpr, window.devicePixelRatio || 1);
 
   const area = () => {
     const i = h.insets();
@@ -42,19 +46,24 @@ export function createBoard(canvas, h) {
     detailTimer = setTimeout(async () => {
       if (!image) return;
       const d = dpr(), want = view.k * d;
-      if (want <= (image.width / size[0]) * 1.15) { detail = null; return; }
+      if (want <= (image.width / size[0]) * 1.15) { if (detail) { detail = null; redraw(); } return; }
       const [x0, y0] = toWorld([0, 0]), [x1, y1] = toWorld([canvas.clientWidth, canvas.clientHeight]);
       const x = Math.max(0, x0), y = Math.max(0, y0), w = Math.min(size[0], x1) - x, ht = Math.min(size[1], y1) - y;
       if (w <= 0 || ht <= 0) return;
       const rect = [x, y, w, ht];
+      // lapisan yang ada masih mencakup dan cukup tajam: tidak perlu render ulang
+      if (detail) {
+        const [dx, dy, dw, dh] = detail.rect;
+        if (x >= dx - 0.5 && y >= dy - 0.5 && x + w <= dx + dw + 0.5 && y + ht <= dy + dh + 0.5 && detail.canvas.width / dw >= want * 0.9) return;
+      }
       const result = await h.detail(rect, want).catch(() => null);
       if (!result || id !== detailId) return;
       detail = { rect, canvas: result };
-      cache = null;
+      cache = false;
       redraw();
-    }, 220);
+    }, 350);
   }
-  function set(v) { Object.assign(view, v); cache = null; redraw(); h.zoomed(view.k / fitK); sharpen(); }
+  function set(v) { Object.assign(view, v); cache = false; redraw(); h.zoomed(view.k / fitK); sharpen(); }
   function glide(to, ms = 250) {
     const from = { ...view }, id = ++anim, t0 = performance.now(), dur = state.still ? 1 : ms;
     const step = (t) => {
@@ -72,12 +81,11 @@ export function createBoard(canvas, h) {
     if (!image) return;
     g.translate(view.x, view.y);
     g.scale(view.k, view.k);
-    g.save();
-    g.shadowColor = '#00000030';
-    g.shadowBlur = 18;
     g.fillStyle = '#fff';
     g.fillRect(0, 0, size[0], size[1]);
-    g.restore();
+    g.strokeStyle = '#00000030';
+    g.lineWidth = 1 / view.k;
+    g.strokeRect(0, 0, size[0], size[1]);
     g.drawImage(image, 0, 0, size[0], size[1]);
     if (detail) g.drawImage(detail.canvas, detail.rect[0], detail.rect[1], detail.rect[2], detail.rect[3]);
     h.paint(g, view.k);
@@ -86,10 +94,12 @@ export function createBoard(canvas, h) {
     queued = false;
     const d = dpr(), W = canvas.clientWidth, H = canvas.clientHeight;
     if (!W || !H) return;
-    if (canvas.width !== Math.round(W * d) || canvas.height !== Math.round(H * d)) { canvas.width = Math.round(W * d); canvas.height = Math.round(H * d); cache = null; }
+    if (canvas.width !== Math.round(W * d) || canvas.height !== Math.round(H * d)) { canvas.width = Math.round(W * d); canvas.height = Math.round(H * d); cache = false; fresh = false; }
     // saat menggores, gambar dasar dipakai ulang supaya tinta menempel di ujung pen
-    if (cache) { g.setTransform(1, 0, 0, 1, 0, 0); g.drawImage(cache, 0, 0); g.setTransform(d, 0, 0, d, 0, 0); g.translate(view.x, view.y); g.scale(view.k, view.k); }
-    else paintBase(d);
+    // begitu juga saat hanya bidikan atau garis bantu yang bergerak
+    if (cache || fresh) { g.setTransform(1, 0, 0, 1, 0, 0); g.clearRect(0, 0, canvas.width, canvas.height); g.drawImage(held, 0, 0); g.setTransform(d, 0, 0, d, 0, 0); g.translate(view.x, view.y); g.scale(view.k, view.k); }
+    else { paintBase(d); if (wantCopy) { copy(); fresh = true; } }
+    wantCopy = false;
     if (image) h.live(g, view.k);
     const aid = image && h.guides();
     const target = state.loupe ?? state.aim;
@@ -98,14 +108,23 @@ export function createBoard(canvas, h) {
       if (aid.loupe) loupe(d, W, target);
     }
   }
-  const redraw = () => { if (!queued) { queued = true; requestAnimationFrame(draw); } };
+  const schedule = () => { if (!queued) { queued = true; requestAnimationFrame(draw); } };
+  /** Isi halaman berubah: gambar ulang penuh. */
+  const redraw = () => { fresh = false; schedule(); };
+  /** Hanya bidikan, kaca pembesar, atau garis sementara yang berubah. */
+  const overlay = () => { wantCopy = true; schedule(); };
 
+  function copy() {
+    held ??= document.createElement('canvas');
+    if (held.width !== canvas.width || held.height !== canvas.height) { held.width = canvas.width; held.height = canvas.height; }
+    const k = held.getContext('2d');
+    k.clearRect(0, 0, held.width, held.height);
+    k.drawImage(canvas, 0, 0);
+  }
   function snapshot() {
     paintBase(dpr());
-    cache = document.createElement('canvas');
-    cache.width = canvas.width;
-    cache.height = canvas.height;
-    cache.getContext('2d').drawImage(canvas, 0, 0);
+    copy();
+    cache = true;
   }
 
   /** Garis tegak dan datar selebar layar melalui titik bidik, untuk memeriksa kesejajaran. */
@@ -164,7 +183,7 @@ export function createBoard(canvas, h) {
     clearTimeout(hold);
     if (act && ['draw', 'place', 'erase', 'paint', 'box', 'legend'].includes(act.kind)) h.cancel();
     act = null;
-    cache = null;
+    cache = false;
     state.loupe = null;
     redraw();
   }
@@ -174,12 +193,13 @@ export function createBoard(canvas, h) {
     hold = setTimeout(() => { if (act?.kind === 'draw' && h.straighten()) { act.locked = true; navigator.vibrate?.(20); redraw(); } }, 550);
   }
   function track(screen) {
+    const had = state.aim;
     state.aim = h.guides() ? { screen, point: h.aimPoint(toWorld(screen)) } : null;
-    redraw();
+    if (state.aim || had) overlay();
   }
   function aim(screen, type) {
     state.loupe = { screen, point: h.preview(toWorld(screen), type) };
-    redraw();
+    overlay();
   }
 
   canvas.addEventListener('pointerdown', (e) => {
@@ -277,7 +297,7 @@ export function createBoard(canvas, h) {
       }
       if (act.kind === 'box') track(p);
       if (act.kind === 'draw' && !act.locked && Math.hypot(p[0] - act.last[0], p[1] - act.last[1]) > 3) armShape();
-      redraw();
+      if (act.kind === 'draw' || act.kind === 'box') overlay(); else redraw();
     }
     act.last = p;
   });
@@ -298,7 +318,7 @@ export function createBoard(canvas, h) {
     const a = act, p = at(e), w = toWorld(p);
     act = null;
     if (a.type === 'touch') state.aim = null;
-    cache = null;
+    cache = false;
     state.loupe = null;
     if (cancelled) h.cancel();
     else if (a.kind === 'legend') h.grabEnd(a.moved, w, a.type);
@@ -309,7 +329,7 @@ export function createBoard(canvas, h) {
     else if (!a.moved && a.may !== false) h.tap(w, a.type);
     redraw();
   }
-  canvas.addEventListener('pointerleave', () => { if (state.aim) { state.aim = null; redraw(); } });
+  canvas.addEventListener('pointerleave', () => { if (state.aim) { state.aim = null; overlay(); } });
   canvas.addEventListener('pointerup', (e) => end(e, false));
   canvas.addEventListener('pointercancel', (e) => end(e, true));
   canvas.addEventListener('dblclick', (e) => { if (h.tool().input === 'pan') glide(fitView()); else h.double(toWorld(at(e))); });
@@ -321,10 +341,10 @@ export function createBoard(canvas, h) {
     set(clamp(around(at(e), k)));
   }, { passive: false });
   for (const ev of ['contextmenu', 'gesturestart', 'gesturechange', 'touchstart', 'touchmove']) canvas.addEventListener(ev, (e) => e.preventDefault(), { passive: false });
-  new ResizeObserver(() => { cache = null; if (image) set(view.k <= fitK * 1.01 ? fitView() : clamp(view)); }).observe(canvas);
+  new ResizeObserver(() => { cache = false; if (image) set(view.k <= fitK * 1.01 ? fitView() : clamp(view)); }).observe(canvas);
 
   return {
-    view, state, redraw, toScreen, toWorld,
+    view, state, redraw, overlay, toScreen, toWorld,
     fit(animate = true) { if (animate) glide(fitView(), 340); else set(fitView()); },
     zoomBy(f) { const a = area(); glide(clamp(around([a.x + a.w / 2, a.y + a.h / 2], Math.max(fitK, Math.min(fitK * ZOOM_MAX, view.k * f))))); },
     zoom: () => view.k / fitK,
@@ -343,7 +363,8 @@ export function createBoard(canvas, h) {
       detailId++;
       image = bmp;
       size = pageSize;
-      cache = null;
+      cache = false;
+      fresh = false;
       if (!bmp) return;
       if (keep) set(clamp(view)); else set(fitView());
     },
