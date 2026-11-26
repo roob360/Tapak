@@ -22,7 +22,7 @@ const KEYS = { v: ['progres', 'pilih'], t: ['petakan', 'titik'], g: ['petakan', 
 const HINT = {
   titik: 'Ketuk untuk menaruh titik. Tahan lalu geser untuk membidik.', garis: 'Ketuk tiap sudut, lalu Selesai.', area: 'Ketuk tiap sudut, ketuk titik awal atau Selesai.',
   kotak: 'Tarik dari sudut ke sudut.', bulat: 'Tarik dari pusat ke tepi.', bebas: 'Gambar mengikuti elemen. Tahan di akhir untuk merapikan.', pilih: 'Ketuk elemen atau tarik kotak.', ubah: 'Pilih elemen, lalu geser badannya atau tarik sudutnya.',
-  kuas: 'Pilih tahap di atas, lalu ketuk atau sapu elemen.', cari: 'Tarik kotak di sekeliling SATU contoh.', ruang: 'Ketuk bagian kosong di dalam ruangan.', skala: 'Ketuk dua titik yang jaraknya diketahui.',
+  kuas: 'Pilih tahap di atas, lalu ketuk atau sapu elemen.', cari: 'Tentukan area scan dulu, lalu tunjuk satu contoh.', ruang: 'Ketuk bagian kosong di dalam ruangan.', skala: 'Ketuk dua titik yang jaraknya diketahui.',
   catatan: 'Ketuk untuk menaruh catatan.', stempel: 'Ketuk untuk menaruh stempel.', awan: 'Tarik kotak mengelilingi bagian yang direvisi.',
 };
 
@@ -43,7 +43,7 @@ export function applyTheme() { document.documentElement.dataset.theme = prefs.th
 /** Keadaan lembar kerja yang sedang terbuka. */
 export const S = {
   file: null, pdf: null, view: null, names: [], page: 0, mode: 'progres', tool: 'pilih', fav: 0, stage: null, selected: new Set(),
-  filter: null, until: null, lastMade: null, dismissed: '', period: null, legendDrag: null, editDrag: null, vertex: null, panel: null, draft: [], cursor: null, drag: null, stroke: null, found: null, pop: new Map(), legendBox: null,
+  filter: null, until: null, lastMade: null, picked: null, area: null, dismissed: '', period: null, legendDrag: null, editDrag: null, vertex: null, panel: null, draft: [], cursor: null, drag: null, stroke: null, found: null, pop: new Map(), legendBox: null,
 };
 const history = M.createHistory();
 let hintTimer = 0;
@@ -144,6 +144,7 @@ export async function showPage(i, direction = 0) {
   S.page = Math.max(0, Math.min(S.view.pages - 1, i));
   S.selected.clear();
   S.draft = []; S.found = null; S.cursor = null; S.drag = null;
+  if (S.area && S.area !== 'all') S.area = null; // area kotak hanya berlaku di lembar tempat ia dibuat
   const page = S.page, bmp = await bitmapOf(page);
   if (!S.file || page !== S.page) return;
   bitmap = bmp;
@@ -207,10 +208,11 @@ export function setMode(mode, tool) {
   renderRail(true);
   refresh();
 }
-function resetTool() { S.vertex = null; S.panel = null; S.draft = []; S.found = null; S.cursor = null; S.drag = null; closeWheel(); }
+function resetTool() { S.picked = null; S.vertex = null; S.panel = null; S.draft = []; S.found = null; S.cursor = null; S.drag = null; closeWheel(); }
 export async function setTool(id) {
   // mengetuk alat yang sedang aktif = selesai, kembali ke Pilih (pengganti Esc di tablet)
-  if (id === S.tool && id !== 'pilih' && S.mode !== 'gambar' && TOOLS[S.mode].find((t) => t[0] === id)?.[2] !== 'action') return selectTool();
+  // hanya bila alat itu sudah pernah diketuk; alat bawaan saat ganti mode tidak dihitung
+  if (id === S.tool && S.picked === id && id !== 'pilih' && S.mode !== 'gambar' && TOOLS[S.mode].find((t) => t[0] === id)?.[2] !== 'action') return selectTool();
   const action = TOOLS[S.mode].find((t) => t[0] === id)?.[2] === 'action';
   if (action) {
     S.panel = id;
@@ -225,6 +227,8 @@ export async function setTool(id) {
   if (id.startsWith('fav')) S.fav = +id.slice(3);
   if (id !== 'pilih') S.selected.clear();
   resetTool();
+  S.picked = id;
+  if (prefs.snap && ['garis', 'area', 'skala'].includes(id)) analysis().catch(() => {}); // disiapkan lebih awal agar titik pertama tidak menunggu
   renderRail();
   refresh();
 }
@@ -320,7 +324,7 @@ let pointerAt = null;
 function overWhat(p) {
   if (!p) return null;
   const L = S.legendBox, reach = 12 / board.view.k;
-  if (L && S.mode !== 'gambar' && !S.found && !S.draft.length) {
+  if (L && ['pilih', 'kuas'].includes(S.tool) && !S.found && !S.draft.length) {
     if (S.mode === 'progres' && Math.hypot(p[0] - L.x - L.w, p[1] - L.y - L.h) <= reach) return 'size';
     if (p[0] >= L.x && p[0] <= L.x + L.w && p[1] >= L.y && p[1] <= L.y + L.h) return 'legend';
   }
@@ -512,6 +516,20 @@ const handlers = {
       for (const mid of midpoints(shape)) dot(mid, 4, '#34c759');
     }
     S.legendBox = drawLegend(g, p, S.page, M.summary(p, S.page, S.until), { unit: legendUnit(), mode: prefs.colorMode, until: S.until, elements: shown, page: S.view.sizes[S.page], handle: S.mode === 'progres' ? px : 0 });
+    if ((S.tool === 'cari' || S.found) && S.area && S.area !== 'all' && S.area.page === S.page) {
+      const [x, y, w, h] = S.area.rect, [pw, ph] = S.view.sizes[S.page];
+      g.save();
+      g.fillStyle = '#00000024'; // di luar area diredupkan
+      g.beginPath();
+      g.rect(0, 0, pw, ph);
+      g.rect(x, y, w, h);
+      g.fill('evenodd');
+      g.strokeStyle = '#2563eb';
+      g.lineWidth = 2 * px;
+      g.setLineDash([10 * px, 6 * px]);
+      g.strokeRect(x, y, w, h);
+      g.restore();
+    }
     for (const c of S.found?.list ?? []) {
       if (c.page !== S.page) continue;
       g.save();
@@ -557,7 +575,7 @@ const handlers = {
   grab(p, type, may) {
     if (may && editing() && grabElement(p, type)) return true;
     const L = S.legendBox;
-    if (!L || S.found || S.draft.length || S.mode === 'gambar') return false;
+    if (!L || S.found || S.draft.length || !['pilih', 'kuas'].includes(S.tool)) return false; // saat menggambar, legenda tidak menghalangi
     const reach = (type === 'touch' ? 22 : 12) / board.view.k;
     const size = S.mode === 'progres' && Math.hypot(p[0] - L.x - L.w, p[1] - L.y - L.h) <= reach;
     if (!size && !(p[0] >= L.x && p[0] <= L.x + L.w && p[1] >= L.y && p[1] <= L.y + L.h)) return false;
@@ -639,7 +657,13 @@ const handlers = {
     if (!moved) return handlers.tap(d.a, type);
     const a = d.a, box = [Math.min(a[0], p[0]), Math.min(a[1], p[1]), Math.abs(p[0] - a[0]), Math.abs(p[1] - a[1])];
     const [x, y, w, h] = box;
-    if (S.found || S.tool === 'cari') return search(box);
+    if (S.found) return search(box);
+    if (S.tool === 'cari') {
+      if (S.area) return search(box);
+      if (w * board.view.k < 30 || h * board.view.k < 30) return toast('Area terlalu kecil. Tarik kotak yang melingkupi bagian yang akan discan.');
+      S.area = { page: S.page, rect: box };
+      return refresh();
+    }
     if (S.tool === 'pilih') {
       for (const el of elements()) { const [cx, cy] = G.center(el); if (cx >= x && cx <= x + w && cy >= y && cy <= y + h) S.selected.add(el.id); }
       return refresh();
@@ -806,7 +830,7 @@ const autoRoom = (p) => job('Mencari tepi ruangan…', async () => {
 
 /** Cari simbol: kotak contoh -> daftar hasil yang bisa diterima atau dibuang. */
 export function search(box) {
-  const found = S.found ?? { list: [], samples: [], all: false, similarity: prefs.similarity };
+  const found = S.found ?? { list: [], samples: [], all: false, similarity: prefs.similarity, area: S.area, known: 0 };
   if (box) {
     if (box[2] * board.view.k < 8 || box[3] * board.view.k < 8) return;
     found.samples.push({ page: S.page, box });
@@ -822,17 +846,25 @@ export function search(box) {
       templates.push({ k, ...(await call('sample', { box: s.box.map((v) => v * k) })) });
     }
     const pages = found.all ? [...Array(S.view.pages).keys()] : [...new Set(found.samples.map((s) => s.page))];
+    const area = found.area;
+    let known = 0;
+    /** Area yang sama (sebanding) berlaku di lembar lain. */
+    const within = (page, [mx, my]) => {
+      if (!area || area === 'all') return true;
+      const [x, y, w, h] = area.rect, kx = S.view.sizes[page][0] / S.view.sizes[area.page][0], ky = S.view.sizes[page][1] / S.view.sizes[area.page][1];
+      return mx >= x * kx && mx <= (x + w) * kx && my >= y * ky && my <= (y + h) * ky;
+    };
     for (const page of pages) {
       const bmp = await bitmapOf(page);
       const k = await loadImage(bmp, S.view.sizes[page][0]);
-      const marks = M.allElements(project(), page);
       for (const t of templates) {
         const hits = await call('similar', { box: [0, 0, t.w, t.h], sample: { g: t.g, w: t.w, h: t.h }, threshold: found.similarity / 100, rotations: true });
         for (const f of hits) {
           const c = { page, x: f.x / k, y: f.y / k, w: f.w / k, h: f.h / k, on: true };
           const mid = [c.x + c.w / 2, c.y + c.h / 2];
           const near = (o) => Math.abs(o.x + o.w / 2 - mid[0]) < c.w * 0.6 && Math.abs(o.y + o.h / 2 - mid[1]) < c.h * 0.6;
-          if (results.some((o) => o.page === page && near(o)) || marks.some((e) => { const [x, y] = G.center(e); return Math.abs(x - mid[0]) < c.w / 2 && Math.abs(y - mid[1]) < c.h / 2; })) continue;
+          if (!within(page, mid) || results.some((o) => o.page === page && near(o))) continue;
+          if (M.pointTaken(project(), page, mid, Math.max(c.w, c.h))) { known++; continue; }
           const before = found.list.find((o) => o.page === page && near(o));
           results.push({ ...c, on: before ? before.on : true });
         }
@@ -841,9 +873,10 @@ export function search(box) {
     return () => {
       if (S.found !== found) return;
       found.list = results;
+      found.known = known;
       P.found();
       board.redraw();
-      toast(results.length ? `${results.length} ditemukan` : 'Tidak ditemukan. Turunkan kemiripan atau tambah contoh.');
+      toast(results.length ? `${results.length} ditemukan${known ? `, ${known} dilewati karena sudah ada` : ''}` : known ? `Tidak ada yang baru: ${known} tempat sudah bertitik` : 'Tidak ditemukan. Turunkan kemiripan atau tambah contoh.');
     };
   });
 }
@@ -851,10 +884,11 @@ export function acceptFound() {
   const found = S.found;
   const chosen = found.list.filter((c) => c.on);
   S.found = null;
-  change(() => { for (const page of new Set(chosen.map((c) => c.page))) M.addCandidates(project(), page, chosen.filter((c) => c.page === page)); });
+  let added = 0;
+  change(() => { for (const page of new Set(chosen.map((c) => c.page))) added += M.addCandidates(project(), page, chosen.filter((c) => c.page === page)); });
   closeAll();
-  setMode('progres', 'pilih');
-  toast(`${chosen.length} kandidat ditambahkan. Beri tanggal agar masuk rekap.`, { label: 'Urungkan', run: undo });
+  refresh();
+  toast(`${added} kandidat ditambahkan. Bisa scan lagi, atau beri tanggal di Progres.`, { label: 'Urungkan', run: undo });
 }
 export function cancelFound() { S.found = null; board.redraw(); refresh(); }
 
@@ -929,6 +963,9 @@ function renderFloat() {
   const bar = $('#selbar');
   let html = '';
   if (S.period && !S.selected.size && !S.draft.length) html = `<b>Disorot: ${M.shortDate(S.period.from)} – ${M.shortDate(S.period.to)}</b><button class="solid" data-a="period-off">Matikan sorot</button>`;
+  else if (S.tool === 'cari' && !S.found && !S.selected.size) html = !S.area
+    ? '<b>1 · Tarik kotak area yang akan discan</b><button class="solid" data-a="area-all">Seluruh lembar</button>'
+    : '<b>2 · Tarik kotak di SATU contoh</b><button class="soft" data-a="area-reset">Ganti area</button>';
   else if (S.draft.length && S.tool !== 'skala') html = `<button data-a="draft-cancel">Batal</button><button data-a="draft-back">Hapus titik</button><button class="solid" data-a="draft-ok">${icon('check')}Selesai</button>`;
   else if (editing() && S.selected.size) html = `<b>${S.selected.size} terpilih</b>${S.vertex !== null && S.selected.size === 1 ? '<button class="solid" data-a="vertex-del">Buang sudut</button>' : ''}<button class="soft" data-a="props">Atur</button><button class="soft" data-a="copy">Salin ke lembar</button><button data-a="element-menu" aria-label="Lainnya">${icon('more')}</button><button data-a="delete" class="warn" aria-label="Hapus">${icon('trash')}</button><button data-a="unselect" aria-label="Batal pilih">${icon('close')}</button>`;
   else if (S.selected.size) html = `<b>${S.selected.size} terpilih</b><button class="solid" data-a="date">Beri tanggal</button><button class="soft" data-a="undate">Hapus tgl</button><button data-a="element-menu" aria-label="Lainnya">${icon('more')}</button><button data-a="delete" class="warn" aria-label="Hapus">${icon('trash')}</button><button data-a="unselect" aria-label="Batal pilih">${icon('close')}</button>`;
@@ -988,6 +1025,7 @@ export function layout() {
 export async function openWork(file, pdf, onHome) {
   home = onHome;
   S.file = file;
+  S.area = null;
   autoPanel = null;
   S.lastMade = null;
   S.page = 0; S.mode = 'progres'; S.tool = 'pilih'; S.selected.clear(); S.until = null; S.period = null; S.filter = null; S.found = null; S.draft = [];
@@ -1062,6 +1100,8 @@ async function onClick(e) {
     copy: P.copyDialog,
     props: () => { closeAll(); P.elementsPanel({ quiet: true }); },
     'period-off': () => { S.period = null; refresh(); },
+    'area-all': () => { S.area = 'all'; refresh(); },
+    'area-reset': () => { S.area = null; refresh(); },
     'vertex-del': removeSelectedVertex,
     undate: P.undateDialog,
     'element-menu': P.elementMenu,

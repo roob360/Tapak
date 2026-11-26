@@ -181,3 +181,15 @@ test('progres periode dan volume per tahap', () => {
   assert.equal(v.unscaled, false);
   assert.ok(new TextDecoder().decode(toXlsx(p, ['a', 'b', 'c'])).includes('SUMIF'));
 });
+
+test('scan ulang tidak menaruh titik dobel di tempat yang sama', () => {
+  const p = P.emptyProject('a.pdf', 1);
+  const box = (x, y) => ({ x, y, w: 20, h: 20 });
+  assert.equal(M.addCandidates(p, 0, [box(10, 10), box(100, 10)]), 2);
+  assert.equal(M.addCandidates(p, 0, [box(13, 12), box(100, 10), box(200, 10), box(202, 11)]), 1);
+  assert.equal(M.candidates(p, 0).length, 3);
+  M.addElement(p, { page: 0, shape: 'point', pts: [[310, 20]], r: 9 });
+  assert.equal(M.addCandidates(p, 0, [box(302, 12)]), 0);
+  M.addElement(p, { page: 0, shape: 'poly', pts: [[390, 0], [430, 0], [430, 40], [390, 40]] });
+  assert.equal(M.addCandidates(p, 0, [box(400, 10)]), 1);
+});

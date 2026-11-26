@@ -82,7 +82,12 @@ export function removeElements(p, els) {
   p.takeoff.measures = p.takeoff.measures.filter((m) => !measures.has(m.id));
 }
 
-/** Simpan hasil Cari simbol sebagai titik hitung takeoff, supaya PDFKill desktop melihatnya juga. */
+/** Sudah ada titik (penanda atau kandidat) di tempat ini? `size` = sisi terpanjang bentuk yang ditemukan. */
+export function pointTaken(p, page, mid, size) {
+  return allElements(p, page).some((e) => e.shape === 'point' && dist(e.pts[0], mid) <= Math.max(size * 0.6, e.r ?? 0));
+}
+
+/** Simpan hasil Cari simbol sebagai titik hitung takeoff, supaya PDFKill desktop melihatnya juga. Return jumlah yang ditambah. */
 export function addCandidates(p, page, boxes) {
   let item = p.takeoff.items.find((i) => i.type === 'count' && i.name === 'Simbol (Tapak)');
   if (!item) {
@@ -90,8 +95,15 @@ export function addCandidates(p, page, boxes) {
     p.takeoff.items.push(item);
   }
   let id = Math.max(item.id + 1, nextId(p.takeoff.measures), p.takeoff.nextId ?? 1);
-  for (const b of boxes) p.takeoff.measures.push({ id: id++, itemId: item.id, page, pts: [[b.x + b.w / 2, b.y + b.h / 2]], box: [b.w, b.h] });
+  let added = 0;
+  for (const b of boxes) {
+    const mid = [b.x + b.w / 2, b.y + b.h / 2];
+    if (pointTaken(p, page, mid, Math.max(b.w, b.h))) continue;
+    p.takeoff.measures.push({ id: id++, itemId: item.id, page, pts: [mid], box: [b.w, b.h] });
+    added++;
+  }
   p.takeoff.nextId = id;
+  return added;
 }
 
 /** Penomoran berurutan dalam urutan baca. */

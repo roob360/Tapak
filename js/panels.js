@@ -442,7 +442,7 @@ export function found() {
     s.el.addEventListener('change', (e) => { if (S.found && e.target.type === 'range') { S.found.similarity = prefs.similarity = Number(e.target.value); savePrefs(); W.search(); } });
   }
   const n = f.list.filter((c) => c.on).length;
-  open.found.update(`<p class="sub">${f.list.length} ditemukan dari ${f.samples.length} contoh</p>
+  open.found.update(`<p class="sub">${f.list.length} baru dari ${f.samples.length} contoh${f.known ? ` · ${f.known} sudah bertitik, dilewati` : ''} · ${!f.area || f.area === 'all' ? 'seluruh lembar' : 'di dalam area'}</p>
     <p class="label">Cari di</p><div class="grid2"><button class="${f.all ? 'soft' : 'solid'}" data-scope="one">Lembar ini</button><button class="${f.all ? 'solid' : 'soft'}" data-scope="all">Semua lembar</button></div>
     <label class="range">Kemiripan<input type="range" min="55" max="95" step="5" value="${f.similarity}"><output>${f.similarity}%</output></label>
     <p class="hint">Ketuk kotak di gambar untuk membuang yang salah. Tarik kotak lain untuk menambah contoh. Hasil menjadi kandidat, belum masuk rekap.</p>
@@ -465,7 +465,7 @@ export function viewPanel(focus) {
       <label class="range">Ukuran<input type="range" data-k="scale" min="50" max="400" step="10" value="${scale}"><output>${scale}%</output></label>
       <div class="grid2">${[['atas-kiri', 'Kiri atas'], ['atas-kanan', 'Kanan atas'], ['bawah-kiri', 'Kiri bawah'], ['bawah-kanan', 'Kanan bawah']].map(([v, n]) => `<button class="soft" data-corner="${v}">${n}</button>`).join('')}</div>
       ${sw('allsheets', 'Posisi berlaku untuk semua lembar', false)}
-      <p class="hint">Di gambar: seret legenda untuk memindah, seret bulatan di sudutnya untuk mengubah ukuran (mode Progres).</p>
+      <p class="hint">Di gambar, dengan alat Pilih atau Kuas: seret legenda untuk memindah, seret bulatan di sudutnya untuk mengubah ukuran (mode Progres).</p>
       <p class="label">Lainnya</p>${sw('show', 'Tampilkan penanda', p.progress.show !== false)}${sw('notes', 'Tampilkan coretan', p.annotations.show !== false)}${sw('sequential', 'Tahap berurutan (isi yang sebelumnya)', prefs.sequential)}
       <label class="field">Kondisi hingga tanggal<input type="date" value="${S.until ?? ''}"></label><button class="soft wide" data-clear>Tampilkan semua tanggal</button>
       <p class="label">Sorot satu tahap</p><div class="chips">${W.stages().map((x) => `<button class="${S.filter === x.id ? 'solid' : 'soft'}" data-filter="${esc(x.id)}">${esc(x.name)}</button>`).join('')}</div>`,
