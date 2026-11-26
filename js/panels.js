@@ -25,8 +25,10 @@ const sw = (key, label, on) => `<div class="row"><span>${esc(label)}</span><butt
 
 /* ---------- elemen ---------- */
 let listFilter = 'semua', listAll = false;
-export function elementsPanel() {
-  const s = register('elements', sheet({ title: 'Elemen', kind: 'panel' }));
+export function elementsPanel(options = {}) {
+  const quiet = options.quiet === true;
+  const s = register('elements', sheet({ title: quiet ? 'Properti' : 'Elemen', kind: 'panel', quiet }));
+  s.propsFirst = quiet;
   renderElements(s);
   queueMicrotask(() => W.refresh());
   s.el.addEventListener('click', async (e) => {
@@ -45,19 +47,38 @@ export function elementsPanel() {
       const stage = d.check, list = W.selected(), all = list.every((x) => x.st?.[stage]);
       change(() => { for (const x of list) { const real = M.realize(project(), x); if (all) M.clearStages(W.stages(), real, stage); else if (!real.st?.[stage]) M.mark(W.stages(), real, stage, M.today(), prefs.sequential); S.selected.delete(x.id); S.selected.add(real.id); } });
       W.pop([...S.selected]);
-    } else if (d.act === 'delete') W.deleteSelected();
+    } else if (d.style) W.restyle({ style: d.style });
+    else if (d.act === 'split') splitSides();
+    else if (d.act === 'copy') copyDialog();
+    else if (d.act === 'list') { s.propsFirst = false; renderElements(s); }
+    else if (d.act === 'delete') W.deleteSelected();
     else if (d.act === 'date') dateDialog();
   });
   s.el.dataset.panel = 'elemen';
+  s.el.addEventListener('input', (e) => {
+    const t = e.target;
+    if (!t.dataset.size) return;
+    t.nextElementSibling.value = t.value;
+    s.sizeBefore ??= JSON.stringify(project());
+    W.restyle({ [t.dataset.size]: Number(t.value) }, false);
+  });
   s.el.addEventListener('change', (e) => {
     const t = e.target, list = W.selected();
+    if (t.dataset.size && s.sizeBefore) {
+      // satu geseran = satu langkah urungkan
+      const value = Number(t.value);
+      S.file.project = JSON.parse(s.sizeBefore);
+      s.sizeBefore = null;
+      W.restyle({ [t.dataset.size]: value });
+      return;
+    }
     if (t.dataset.date) change(() => { for (const x of list) { const real = M.realize(project(), x); M.setStage(W.stages(), real, t.dataset.date, t.value || null); S.selected.delete(x.id); S.selected.add(real.id); } });
     if (t.dataset.name !== undefined) change(() => { const real = M.realize(project(), list[0]); if (t.value.trim()) real.label = t.value.trim(); else delete real.label; S.selected.clear(); S.selected.add(real.id); });
   });
   return s;
 }
 function renderElements(s) {
-  if (document.activeElement && s.el.contains(document.activeElement) && document.activeElement.matches('input')) return;
+  if (s.sizeBefore || (document.activeElement && s.el.contains(document.activeElement) && document.activeElement.matches('input:not([type=range])'))) return;
   const p = project();
   const pages = listAll ? [...Array(S.view.pages).keys()] : [S.page];
   const rows = pages.flatMap((page) => M.allElements(p, page).map((el) => ({ page, el, stages: M.stagesOf(p, page) })))
@@ -69,13 +90,28 @@ function renderElements(s) {
   const props = sel.length ? `<hr><h3>${one ? esc(one.label || 'Elemen terpilih') : `${sel.length} elemen terpilih`}<button class="link warn" data-act="delete">Hapus</button></h3>
     ${one ? `<label class="field">Nama<input data-name value="${esc(one.label ?? '')}"></label>${measure(one)}` : ''}
     ${st.map((x) => { const have = sel.filter((e) => e.st?.[x.id]).length; const date = sel.every((e) => e.st?.[x.id] === sel[0].st?.[x.id]) ? sel[0].st?.[x.id] ?? '' : ''; return `<div class="row"><button class="check" data-check="${esc(x.id)}" aria-pressed="${have === sel.length ? 'true' : have ? 'mixed' : 'false'}" aria-label="${esc(x.name)}">${icon('check')}</button><i class="dot full" style="--c:${x.color}"></i><span>${esc(x.name)}</span><input type="date" data-date="${esc(x.id)}" value="${date}" aria-label="Tanggal ${esc(x.name)}"></div>`; }).join('')}
-    <button class="solid wide" data-act="date">Beri tanggal</button>` : '<p class="hint">Ketuk elemen di daftar atau di gambar.</p>';
+    ${look(sel)}
+    <div class="chips"><button class="solid" data-act="date">Beri tanggal</button>${sel.some((e) => e.shape === 'line') ? '<button class="soft" data-act="split">Dua sisi</button>' : ''}${S.view.pages > 1 ? '<button class="soft" data-act="copy">Salin ke lembar</button>' : ''}</div>` : '<p class="hint">Ketuk elemen di daftar atau di gambar.</p>';
   const top = s.body.scrollTop;
+  if (s.propsFirst && sel.length) {
+    s.update(`${props.replace('<hr>', '')}<button class="link" data-act="list">Lihat daftar semua elemen</button>`);
+    s.body.scrollTop = top;
+    return;
+  }
   s.update(`<p class="sub">${sum.n} elemen · ${sum.percent}% selesai · ${sum.pending} belum</p>
     <div class="line"><button class="${listFilter === 'semua' ? 'solid' : 'soft'}" data-filter="semua">Semua</button><button class="${listFilter === 'belum' ? 'solid' : 'soft'}" data-filter="belum">Belum</button><span class="grow">Semua lembar</span><button class="switch" data-sw="all" aria-pressed="${listAll}" aria-label="Semua lembar"></button></div>
     <div class="elements">${rows.slice(0, 200).map((r, i) => `<button data-el="${r.page}:${r.el.id}" class="${r.page === S.page && S.selected.has(r.el.id) ? 'on' : ''}${r.el.virtual ? ' ghost' : ''}"><b>${listAll ? `${r.page + 1} · ` : ''}${esc(name(r.el, i))}</b><span>${dots(r)}</span><em>${M.percent(r.stages, r.el)}%</em><em>${M.shortDate(r.el.date) || '—'}</em></button>`).join('') || '<p class="hint">Belum ada elemen.</p>'}</div>
     ${rows.length > 200 ? `<p class="hint">Ditampilkan 200 dari ${rows.length}.</p>` : ''}${props}`);
   s.body.scrollTop = top;
+}
+/** Pengaturan rupa: tebal garis, ukuran dan bentuk titik. */
+function look(sel) {
+  const slider = (key, label, min, max, value) => `<label class="range">${label}<input type="range" data-size="${key}" min="${min}" max="${max}" step="0.5" value="${value}"><output>${value}</output></label>`;
+  const unit = Math.max(...S.view.sizes[S.page]) / 1100;
+  const line = sel.find((e) => e.shape === 'line'), point = sel.find((e) => e.shape === 'point');
+  const round = (v) => Math.round(v * 2) / 2;
+  return (line ? slider('w', 'Tebal garis', 1, 40, round(line.w ?? 6 * unit)) : '')
+    + (point ? slider('r', 'Ukuran titik', 2, 60, round(point.r ?? 9)) + `<div class="chips"><button class="${point.style !== 'bulat' ? 'solid' : 'soft'}" data-style="kotak">Kotak</button><button class="${point.style === 'bulat' ? 'solid' : 'soft'}" data-style="bulat">Bulat</button></div>` : '');
 }
 function measure(el) {
   const m = project().takeoff.scales?.[S.page];
@@ -490,9 +526,9 @@ export function viewPanel(focus) {
 export function settings() {
   const s = sheet({
     title: 'Pengaturan', kind: 'panel',
-    body: `${sw('leftHand', 'Mode tangan kiri', prefs.leftHand)}${sw('finger', 'Jari ikut menggambar', prefs.finger)}${sw('straighten', 'Rapikan bentuk saat ditahan', prefs.straighten)}${sw('wheel', 'Roda pen', prefs.wheel)}${sw('snap', 'Tempel ke garis gambar', prefs.snap)}${sw('strip', 'Daftar lembar', prefs.strip)}
+    body: `${sw('leftHand', 'Mode tangan kiri', prefs.leftHand)}${sw('finger', 'Jari ikut menggambar', prefs.finger)}${sw('straighten', 'Rapikan bentuk saat ditahan', prefs.straighten)}${sw('wheel', 'Roda pen', prefs.wheel)}${sw('snap', 'Tempel ke garis gambar', prefs.snap)}${sw('autoProps', 'Buka properti saat elemen dipilih', prefs.autoProps)}${sw('strip', 'Daftar lembar', prefs.strip)}
       <p class="label">Tampilan</p><div class="chips">${['sistem', 'terang', 'gelap'].map((t) => `<button class="${prefs.theme === t ? 'solid' : 'soft'}" data-theme="${t}">${t[0].toUpperCase()}${t.slice(1)}</button>`).join('')}</div>
-      <p class="hint">Ketuk dua jari: urungkan. Tiga jari: ulangi. Tombol samping pen atau tahan jari: roda pen. Keyboard: V pilih, T titik, G garis, A area, K kotak, R ruang, S cari, C coret, B kuas, Enter, Del, Ctrl+Z, Ctrl+S, PageUp/PageDown.</p>`,
+      <p class="hint">Ketuk dua jari: urungkan. Tiga jari: ulangi. Tombol samping pen atau tahan jari: roda pen. Keyboard: V pilih, T titik, G garis, A area, K kotak, R ruang, S cari, C coret, B kuas, Enter, Esc (selesai dan kembali ke Pilih), Del, Ctrl+A, Ctrl+klik, tombol panah (geser), tahan Spasi (geser gambar), tahan Shift (kunci datar/tegak), F8 Ortho, F10 Polar, klik kanan, Ctrl+Z, Ctrl+S, PageUp/PageDown.</p>`,
   });
   s.el.addEventListener('click', (e) => {
     const b = e.target.closest('button');

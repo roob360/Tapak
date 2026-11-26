@@ -8,7 +8,7 @@ export function createBoard(canvas, h) {
   const view = { k: 1, x: 0, y: 0 };
   const pointers = new Map();
   let image = null, size = [1, 1], fitK = 1, act = null, hold = 0, penDown = null, queued = false, anim = 0, gesture = null, cache = null;
-  const state = { penSeen: false, finger: false, loupe: null, still: false };
+  const state = { penSeen: false, finger: false, loupe: null, aim: null, still: false, add: false, space: false };
   const dpr = () => Math.min(2, window.devicePixelRatio || 1);
 
   const area = () => {
@@ -70,7 +70,12 @@ export function createBoard(canvas, h) {
     if (cache) { g.setTransform(1, 0, 0, 1, 0, 0); g.drawImage(cache, 0, 0); g.setTransform(d, 0, 0, d, 0, 0); g.translate(view.x, view.y); g.scale(view.k, view.k); }
     else paintBase(d);
     if (image) h.live(g, view.k);
-    if (state.loupe) loupe(d, W);
+    const aid = image && h.guides();
+    const target = state.loupe ?? state.aim;
+    if (aid && target) {
+      if (aid.cross) cross(d, W, canvas.clientHeight, target.point);
+      if (aid.loupe) loupe(d, W, target);
+    }
   }
   const redraw = () => { if (!queued) { queued = true; requestAnimationFrame(draw); } };
 
@@ -82,8 +87,23 @@ export function createBoard(canvas, h) {
     cache.getContext('2d').drawImage(canvas, 0, 0);
   }
 
-  function loupe(d, W) {
-    const { screen, point } = state.loupe;
+  /** Garis tegak dan datar selebar layar melalui titik bidik, untuk memeriksa kesejajaran. */
+  function cross(d, W, H, point) {
+    const [x, y] = toScreen(point);
+    g.save();
+    g.setTransform(d, 0, 0, d, 0, 0);
+    for (const [color, width] of [['#ffffffcc', 3], ['#e11d48', 1]]) {
+      g.strokeStyle = color;
+      g.lineWidth = width;
+      g.beginPath();
+      g.moveTo(0, y); g.lineTo(W, y); g.moveTo(x, 0); g.lineTo(x, H);
+      g.stroke();
+    }
+    g.restore();
+  }
+
+  function loupe(d, W, target) {
+    const { screen, point } = target;
     const R = 68, mag = view.k * 2.5;
     const cx = Math.max(R + 8, Math.min(W - R - 8, screen[0])), cy = screen[1] - 128 < R + 8 ? screen[1] + 128 : screen[1] - 128;
     g.save();
@@ -132,6 +152,10 @@ export function createBoard(canvas, h) {
     clearTimeout(hold);
     hold = setTimeout(() => { if (act?.kind === 'draw' && h.straighten()) { act.locked = true; navigator.vibrate?.(20); redraw(); } }, 550);
   }
+  function track(screen) {
+    state.aim = h.guides() ? { screen, point: h.aimPoint(toWorld(screen)) } : null;
+    redraw();
+  }
   function aim(screen, type) {
     state.loupe = { screen, point: h.preview(toWorld(screen), type) };
     redraw();
@@ -141,6 +165,7 @@ export function createBoard(canvas, h) {
     e.preventDefault();
     const p = at(e), type = e.pointerType;
     anim++;
+    state.add = e.ctrlKey || e.metaKey || e.shiftKey;
     if (type === 'pen') {
       if (!state.penSeen) { state.penSeen = true; h.penSeen(); }
       penDown = e.pointerId;
@@ -160,11 +185,11 @@ export function createBoard(canvas, h) {
     // tombol samping pen atau klik kanan: roda pen / menu
     if (e.button === 2 || (type === 'pen' && e.buttons & 2)) { h.menu(p, toWorld(p), type); return; }
 
-    const grabbed = e.button === 0 && h.grab(toWorld(p), type, type !== 'touch' || !state.penSeen || state.finger);
+    const grabbed = e.button === 0 && !state.space && h.grab(toWorld(p), type, type !== 'touch' || !state.penSeen || state.finger);
     if (grabbed) { act = { id: e.pointerId, kind: 'legend', start: p, last: p, type, moved: false, slop: type === 'touch' ? 10 : 4 }; return; }
     const tool = h.tool();
     const eraserTip = e.button === 5 || (e.buttons & 32) !== 0;
-    const mode = eraserTip ? 'erase' : tool.input;
+    const mode = state.space ? 'pan' : eraserTip ? 'erase' : tool.input;
     const may = e.button !== 1 && mode !== 'pan' && (type !== 'touch' || !state.penSeen || state.finger);
     const base = { id: e.pointerId, start: p, last: p, type, moved: false, may, slop: type === 'touch' ? 10 : 4 };
     const world = toWorld(p), pressure = type === 'pen' ? e.pressure : 0.5;
@@ -197,7 +222,7 @@ export function createBoard(canvas, h) {
   canvas.addEventListener('pointermove', (e) => {
     const p = at(e);
     const q = pointers.get(e.pointerId);
-    if (!q) { if (e.pointerType !== 'touch') h.hover(toWorld(p)); return; }
+    if (!q) { if (e.pointerType !== 'touch') { h.hover(toWorld(p)); track(p); } return; }
     q.at = p;
     if (gesture && q.type === 'touch' && Math.hypot(p[0] - q.from[0], p[1] - q.from[1]) > 14) gesture.moved = true;
     if (!act) return;
@@ -219,7 +244,7 @@ export function createBoard(canvas, h) {
       if (act.moved && act.type === 'mouse') canvas.style.cursor = 'grabbing';
       if (act.moved) set(clamp({ k: view.k, x: view.x + p[0] - act.last[0], y: view.y + p[1] - act.last[1] }));
     } else if (act.kind === 'place') aim(p, act.type);
-    else if (act.kind === 'legend') { if (act.moved) h.grabMove(toWorld(p)); }
+    else if (act.kind === 'legend') { if (act.moved) { h.grabMove(toWorld(p)); track(p); } }
     else {
       const list = e.getCoalescedEvents?.() ?? [];
       for (const ev of list.length ? list : [e]) {
@@ -229,6 +254,7 @@ export function createBoard(canvas, h) {
         else if (act.kind === 'erase') h.erase(w, false);
         else h.paintMove(w);
       }
+      if (act.kind === 'box') track(p);
       if (act.kind === 'draw' && !act.locked && Math.hypot(p[0] - act.last[0], p[1] - act.last[1]) > 3) armShape();
       redraw();
     }
@@ -250,6 +276,7 @@ export function createBoard(canvas, h) {
     clearTimeout(hold);
     const a = act, p = at(e), w = toWorld(p);
     act = null;
+    if (a.type === 'touch') state.aim = null;
     cache = null;
     state.loupe = null;
     if (cancelled) h.cancel();
@@ -261,6 +288,7 @@ export function createBoard(canvas, h) {
     else if (!a.moved && a.may !== false) h.tap(w, a.type);
     redraw();
   }
+  canvas.addEventListener('pointerleave', () => { if (state.aim) { state.aim = null; redraw(); } });
   canvas.addEventListener('pointerup', (e) => end(e, false));
   canvas.addEventListener('pointercancel', (e) => end(e, true));
   canvas.addEventListener('dblclick', (e) => { if (h.tool().input === 'pan') glide(fitView()); else h.double(toWorld(at(e))); });
@@ -280,6 +308,11 @@ export function createBoard(canvas, h) {
     zoomBy(f) { const a = area(); glide(clamp(around([a.x + a.w / 2, a.y + a.h / 2], Math.max(fitK, Math.min(fitK * ZOOM_MAX, view.k * f))))); },
     zoom: () => view.k / fitK,
     reveal() { if (image) glide(clamp(view)); },
+    /** Geser seperlunya supaya titik dunia ini tidak tersembunyi di kanan batas `right` (piksel layar). */
+    uncover(point, right) {
+      const over = point[0] * view.k + view.x - right;
+      if (image && over > 0) glide({ k: view.k, x: view.x - over - 40, y: view.y });
+    },
     /** Ruang kerja berubah: yang sedang pas layar tetap pas layar. */
     refit() { if (image) glide(view.k <= fitK * 1.01 ? fitView() : clamp(view)); },
     setPage(bmp, pageSize, keep = false) {
@@ -291,6 +324,8 @@ export function createBoard(canvas, h) {
       if (keep) set(clamp(view)); else set(fitView());
     },
     twoFinger: () => gesture?.max ?? 0,
-    reset() { pointers.clear(); penDown = null; cancel(); },
+    reset() { pointers.clear(); penDown = null; state.aim = null; cancel(); },
+    /** Hitung ulang titik bidik di posisi kursor yang sama (mis. Shift ditekan). */
+    retrack() { if (state.aim) track(state.aim.screen); },
   };
 }

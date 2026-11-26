@@ -9,12 +9,12 @@ import { nextId } from './pkp.js';
 import * as P from './panels.js';
 import { cursorFor } from './cursor.js';
 import { straightenDialog } from './deskew.js';
-import { $, $$, icon, esc, toast, form, choose, move, finished, wheel, closeWheel, closeTop, closeAll, isOpen, panelOpen } from './ui.js';
+import { $, $$, icon, esc, toast, form, choose, move, finished, wheel, closeWheel, closeTop, closeAll, isOpen, panelOpen, dialogOpen } from './ui.js';
 
 const MODES = [['gambar', 'Gambar'], ['petakan', 'Petakan'], ['otomatis', 'Otomatis'], ['progres', 'Progres']];
 const TOOLS = {
   gambar: [['fav0'], ['fav1'], ['fav2'], ['awan', 'Awan', 'drag'], ['catatan', 'Nota', 'place'], ['stempel', 'Cap', 'place'], ['hapus', 'Hapus', 'erase'], ['kuasset', 'Semua', 'action']],
-  petakan: [['titik', 'Titik', 'place'], ['garis', 'Garis', 'place'], ['area', 'Area', 'place'], ['kotak', 'Kotak', 'drag'], ['bulat', 'Bulat', 'drag'], ['bebas', 'Bebas', 'draw'], ['pilih', 'Ubah', 'drag'], ['salin', 'Salin', 'action']],
+  petakan: [['pilih', 'Pilih', 'drag'], ['titik', 'Titik', 'place'], ['garis', 'Garis', 'place'], ['area', 'Area', 'place'], ['kotak', 'Kotak', 'drag'], ['bulat', 'Bulat', 'drag'], ['bebas', 'Bebas', 'draw'], ['salin', 'Salin', 'action']],
   otomatis: [['cari', 'Cari', 'drag'], ['ruang', 'Ruang', 'place'], ['nomor', 'Nomor', 'action'], ['skala', 'Skala', 'place'], ['sisi', 'Sisi', 'action'], ['lurus', 'Lurus', 'action']],
   progres: [['pilih', 'Pilih', 'drag'], ['kuas', 'Kuas', 'paint'], ['elemen', 'Elemen', 'action'], ['hingga', 'Hingga', 'action'], ['legenda', 'Legenda', 'action'], ['rekap', 'Rekap', 'action']],
 };
@@ -28,7 +28,7 @@ const HINT = {
 
 const PREFS_KEY = 'tapak.prefs';
 export const prefs = {
-  alpha: 0.35, names: true, labelTop: true, author: '', leftHand: false, finger: false, straighten: true, wheel: true, snap: true, theme: 'sistem', strip: true, sequential: false,
+  alpha: 0.35, cross: true, loupe: true, ortho: false, polar: false, autoProps: true, lineW: 0, names: true, labelTop: true, author: '', leftHand: false, finger: false, straighten: true, wheel: true, snap: true, theme: 'sistem', strip: true, sequential: false,
   colorMode: 'tahap', dates: true, pct: true, similarity: 80,
   favorites: [
     { name: 'Revisi', brush: 'pulpen', color: '#ff383c', size: 2.5, op: 1, pressure: 0.7, smooth: 0.35 },
@@ -43,7 +43,7 @@ export function applyTheme() { document.documentElement.dataset.theme = prefs.th
 /** Keadaan lembar kerja yang sedang terbuka. */
 export const S = {
   file: null, pdf: null, view: null, names: [], page: 0, mode: 'progres', tool: 'pilih', fav: 0, stage: null, selected: new Set(),
-  filter: null, until: null, period: null, legendDrag: null, editDrag: null, vertex: null, panel: null, draft: [], cursor: null, drag: null, stroke: null, found: null, pop: new Map(), legendBox: null,
+  filter: null, until: null, lastMade: null, dismissed: '', period: null, legendDrag: null, editDrag: null, vertex: null, panel: null, draft: [], cursor: null, drag: null, stroke: null, found: null, pop: new Map(), legendBox: null,
 };
 const history = M.createHistory();
 let hintTimer = 0;
@@ -209,6 +209,8 @@ export function setMode(mode, tool) {
 }
 function resetTool() { S.vertex = null; S.panel = null; S.draft = []; S.found = null; S.cursor = null; S.drag = null; closeWheel(); }
 export async function setTool(id) {
+  // mengetuk alat yang sedang aktif = selesai, kembali ke Pilih (pengganti Esc di tablet)
+  if (id === S.tool && id !== 'pilih' && S.mode !== 'gambar' && TOOLS[S.mode].find((t) => t[0] === id)?.[2] !== 'action') return selectTool();
   const action = TOOLS[S.mode].find((t) => t[0] === id)?.[2] === 'action';
   if (action) {
     S.panel = id;
@@ -269,7 +271,9 @@ const pointRadius = () => {
 };
 function add(shape, pts, extra) {
   let made;
+  if (shape === 'line' && prefs.lineW) extra = { w: prefs.lineW, ...extra };
   change(() => { made = M.addElement(project(), newElement(shape, pts, extra)); });
+  S.lastMade = made.id;
   pop([made.id]);
 }
 function annotate(a) {
@@ -338,6 +342,13 @@ const single = () => (S.selected.size === 1 ? selected()[0] : null);
 const midpoints = (el) => el.pts.slice(0, el.shape === 'poly' ? el.pts.length : -1).map((a, i) => { const b = el.pts[(i + 1) % el.pts.length]; return [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2]; });
 
 function grabElement(p, type) {
+  const direct = hit(p, type);
+  if (direct && direct.shape !== 'poly' && !S.selected.has(direct.id) && !board.state.add) {
+    S.selected = new Set([direct.id]);
+    S.vertex = null;
+    S.editDrag = { kind: 'move', last: p, before: snap(), realized: false, fresh: true };
+    return true;
+  }
   if (!S.selected.size) return false;
   const reach = (type === 'touch' ? 20 : 10) / board.view.k;
   const one = single();
@@ -365,7 +376,7 @@ function moveGrabbed(p) {
     const el = elements().find((e) => e.id === d.id);
     if (!el) return;
     S.vertex = d.index;
-    M.moveVertex(el, d.index, p);
+    M.moveVertex(el, d.index, constrain(p, el.pts[(d.index - 1 + el.pts.length) % el.pts.length]));
   } else {
     if (!d.realized) { // kandidat yang digeser menjadi penanda nyata
       S.selected = new Set(selected().map((e) => M.realize(project(), e).id));
@@ -383,7 +394,80 @@ export function removeSelectedVertex() {
   change(() => { M.removeVertex(elements().find((e) => e.id === el.id), S.vertex); S.vertex = null; });
 }
 
+/** Alat Pilih pada mode yang punya (Progres atau Petakan). */
+export function selectTool() {
+  const last = S.lastMade;
+  S.lastMade = null;
+  setMode(S.mode === 'progres' ? 'progres' : 'petakan', 'pilih');
+  if (last !== null && elements().some((e) => e.id === last)) { S.selected = new Set([last]); pop([last]); }
+  refresh();
+}
+/** Esc: tutup yang paling atas, selesaikan gambar, kembali ke Pilih, lalu lepas pilihan. */
+export function escape() {
+  if (closeWheel()) return;
+  if (dialogOpen()) return closeTop();
+  if (S.found) { closeAll(); return cancelFound(); }
+  const drawing = !['pilih', 'kuas'].includes(S.tool);
+  if (S.draft.length) {
+    if (S.tool !== 'skala' && S.draft.length >= (S.tool === 'area' ? 3 : 2)) finishDraft();
+    else { S.draft = []; S.cursor = null; }
+    return selectTool();
+  }
+  if (drawing || S.tool === 'kuas') return selectTool();
+  S.selected.clear();
+  S.vertex = null;
+  closeAll();
+  refresh();
+}
+/** Properti elemen terbuka sendiri saat dipilih, dan tertutup saat pilihan dilepas. */
+let autoPanel = null;
+function syncProps() {
+  const signature = [...S.selected].join();
+  if (signature !== S.dismissed) S.dismissed = '';
+  if (autoPanel && !autoPanel.el.isConnected) autoPanel = null;
+  const want = prefs.autoProps && S.tool === 'pilih' && ['petakan', 'progres'].includes(S.mode) && S.selected.size > 0 && innerWidth > 800 && !S.dismissed && !S.draft.length;
+  if (want && !autoPanel && !isOpen()) {
+    const panel = P.elementsPanel({ quiet: true });
+    autoPanel = panel;
+    panel.closed.then(() => { if (autoPanel === panel) { autoPanel = null; S.dismissed = [...S.selected].join(); } });
+    const el = selected()[0];
+    if (el) board.uncover([Math.max(...el.pts.map((q) => q[0])), el.pts[0][1]], innerWidth - 400);
+  } else if (!want && autoPanel) {
+    const panel = autoPanel;
+    autoPanel = null;
+    panel.close();
+  }
+}
+
+const AIMING = { petakan: ['titik', 'garis', 'area', 'kotak', 'bulat'], otomatis: ['skala', 'cari', 'ruang'] };
+const aiming = () => !!S.found || (AIMING[S.mode] ?? []).includes(S.tool) || (editing() && !!S.editDrag);
+let shift = false;
+/** Kunci arah dari titik sebelumnya: Ortho (datar/tegak; Shift membalik sesaat) atau Polar (tiap 15 derajat). */
+function constrain(p, from) {
+  if (!from) return p;
+  if (prefs.ortho !== shift) return Math.abs(p[0] - from[0]) >= Math.abs(p[1] - from[1]) ? [p[0], from[1]] : [from[0], p[1]];
+  return prefs.polar ? G.lockAngle(from, p, 15) : p;
+}
+const locked = () => prefs.ortho !== shift || prefs.polar;
+const anchor = () => (['garis', 'area', 'skala'].includes(S.tool) ? S.draft.at(-1) : null);
+export function toggleAid(name) {
+  prefs[name] = !prefs[name];
+  if (prefs[name] && name === 'ortho') prefs.polar = false;
+  if (prefs[name] && name === 'polar') prefs.ortho = false;
+  savePrefs();
+  renderAids();
+  board.redraw();
+}
+function renderAids() {
+  const bar = $('#aids');
+  if (!bar) return;
+  bar.hidden = !aiming();
+  for (const b of $$('button', bar)) b.setAttribute('aria-pressed', String(!!prefs[b.dataset.aid]));
+}
+
 const handlers = {
+  guides: () => (aiming() ? { cross: prefs.cross, loupe: prefs.loupe } : null),
+  aimPoint: (p) => constrain(p, anchor()),
   insets: () => {
     const narrow = innerWidth <= 800;
     const side = (prefs.strip && !narrow ? 92 : 0) + (narrow ? 70 : 86);
@@ -396,7 +480,12 @@ const handlers = {
   penSeen: () => { prefs.finger = false; board.state.finger = false; toast('Pen terdeteksi: pen menggambar, jari menggeser. Ubah di Pengaturan.'); },
   touched: () => closeWheel(),
   multiTap: (n) => { if (n === 2) undo(); else redo(); },
-  menu(screen) {
+  menu(screen, world, type) {
+    if (type === 'mouse') {
+      if (S.draft.length) return escape();
+      const under = (S.tool === 'pilih') && hit(world, type);
+      if (under) { if (!S.selected.has(under.id)) { S.selected = new Set([under.id]); refresh(); } return P.elementMenu(); }
+    }
     if (!prefs.wheel) return;
     const r = $('#plan').getBoundingClientRect();
     navigator.vibrate?.(12);
@@ -495,6 +584,7 @@ const handlers = {
       // ketukan tanpa geser: sudut dipilih (untuk dibuang), atau pilihan elemen diubah seperti biasa
       S.file.project = JSON.parse(d.before.json);
       if (d.kind === 'vertex') { S.vertex = d.index; return refresh(); }
+      if (d.fresh) return refresh();
       return handlers.tap(p, type);
     }
     const d = S.legendDrag;
@@ -604,8 +694,8 @@ const handlers = {
     S.stroke = null; S.drag = null; S.cursor = null;
     board?.redraw();
   },
-  preview(p) { S.cursor = p; return p; },
-  hover(p) { pointerAt = p; updateCursor(); if (S.draft.length) { S.cursor = p; board.redraw(); } },
+  preview(p) { S.cursor = constrain(p, anchor()); return S.cursor; },
+  hover(p) { pointerAt = p; updateCursor(); if (S.draft.length) { S.cursor = constrain(p, anchor()); board.redraw(); } },
   double() { if (S.draft.length > 1) finishDraft(); },
   async tap(p, type) {
     if (S.found) {
@@ -618,6 +708,7 @@ const handlers = {
       S.vertex = null;
       const el = hit(p, type);
       if (!el) S.selected.clear();
+      else if (type === 'mouse' && !board.state.add) { S.selected = new Set([el.id]); pop([el.id]); }
       else if (S.selected.has(el.id)) S.selected.delete(el.id);
       else { S.selected.add(el.id); pop([el.id]); }
       refresh();
@@ -640,7 +731,9 @@ const handlers = {
       const text = pick === 'lain' ? (await form('Teks stempel', [{ key: 'text', label: 'Teks', value: '' }]))?.text.trim().toUpperCase() : pick;
       if (text) annotate({ type: 'stamp', pts: [p], text, color: '#ff383c', size: Math.max(12, Math.max(...S.view.sizes[S.page]) / 60) });
     } else if (t === 'garis' || t === 'area' || t === 'skala') {
-      const q = await snapped(p);
+      // arah yang dikunci tidak ditimpa tempel-ke-garis, supaya tetap sejajar
+      const aimed = constrain(p, anchor());
+      const q = locked() && S.draft.length ? aimed : await snapped(aimed);
       S.cursor = null;
       if (!S.file) return;
       if (t === 'area' && S.draft.length > 2 && G.dist(q, S.draft[0]) <= tol(type) * 1.5) return finishDraft();
@@ -767,7 +860,7 @@ export function cancelFound() { S.found = null; board.redraw(); refresh(); }
 
 /* ---------- tampilan ---------- */
 function toolMeta(id, label) {
-  if (!id.startsWith('fav')) return { label, svg: icon(id === 'kuasset' ? 'more' : label === 'Ubah' ? 'ubah' : id) };
+  if (!id.startsWith('fav')) return { label, svg: icon(id === 'kuasset' ? 'more' : id === 'pilih' ? 'panah-pilih' : id) };
   const f = prefs.favorites[+id.slice(3)];
   return { label: f.name, svg: `<svg class="i" viewBox="0 0 24 24"><path d="M3 15c4-8 7 4 11-1s4-6 7-5" style="stroke:${f.color === '#1c1c1e' ? 'currentColor' : f.color};stroke-width:${f.brush === 'stabilo' ? 7 : 2.5};opacity:${f.brush === 'stabilo' ? 0.7 : 1}"/></svg>` };
 }
@@ -837,7 +930,7 @@ function renderFloat() {
   let html = '';
   if (S.period && !S.selected.size && !S.draft.length) html = `<b>Disorot: ${M.shortDate(S.period.from)} – ${M.shortDate(S.period.to)}</b><button class="solid" data-a="period-off">Matikan sorot</button>`;
   else if (S.draft.length && S.tool !== 'skala') html = `<button data-a="draft-cancel">Batal</button><button data-a="draft-back">Hapus titik</button><button class="solid" data-a="draft-ok">${icon('check')}Selesai</button>`;
-  else if (editing() && S.selected.size) html = `<b>${S.selected.size} terpilih</b>${S.vertex !== null && S.selected.size === 1 ? '<button class="solid" data-a="vertex-del">Buang sudut</button>' : ''}<button class="soft" data-a="copy">Salin ke lembar</button><button data-a="element-menu" aria-label="Lainnya">${icon('more')}</button><button data-a="delete" class="warn" aria-label="Hapus">${icon('trash')}</button><button data-a="unselect" aria-label="Batal pilih">${icon('close')}</button>`;
+  else if (editing() && S.selected.size) html = `<b>${S.selected.size} terpilih</b>${S.vertex !== null && S.selected.size === 1 ? '<button class="solid" data-a="vertex-del">Buang sudut</button>' : ''}<button class="soft" data-a="props">Atur</button><button class="soft" data-a="copy">Salin ke lembar</button><button data-a="element-menu" aria-label="Lainnya">${icon('more')}</button><button data-a="delete" class="warn" aria-label="Hapus">${icon('trash')}</button><button data-a="unselect" aria-label="Batal pilih">${icon('close')}</button>`;
   else if (S.selected.size) html = `<b>${S.selected.size} terpilih</b><button class="solid" data-a="date">Beri tanggal</button><button class="soft" data-a="undate">Hapus tgl</button><button data-a="element-menu" aria-label="Lainnya">${icon('more')}</button><button data-a="delete" class="warn" aria-label="Hapus">${icon('trash')}</button><button data-a="unselect" aria-label="Batal pilih">${icon('close')}</button>`;
   const was = !bar.hidden;
   if (!html) {
@@ -862,10 +955,12 @@ export function refresh() {
   renderDock();
   renderRail();
   renderFloat();
+  renderAids();
   updatePercents();
   $('[data-a="redo"]').disabled = !history.canRedo;
   const hint = $('#hint'), text = S.found ? 'Ketuk kotak untuk membuang atau menyertakan. Tarik kotak untuk menambah contoh.' : (editing() ? HINT.ubah : HINT[S.tool] ?? '');
   if (hint.textContent !== text) { hint.textContent = text; hint.hidden = !text; clearTimeout(hintTimer); if (text) { move(hint, [{ opacity: 0, translate: '-50% -6px' }, { opacity: 1, translate: '-50% 0' }]); hintTimer = setTimeout(() => finished(move(hint, [{ opacity: 1 }, { opacity: 0 }], 340)).then(() => { hint.hidden = true; }), 5000); } }
+  syncProps();
   P.refresh();
   board.redraw();
   updateCursor();
@@ -893,6 +988,8 @@ export function layout() {
 export async function openWork(file, pdf, onHome) {
   home = onHome;
   S.file = file;
+  autoPanel = null;
+  S.lastMade = null;
   S.page = 0; S.mode = 'progres'; S.tool = 'pilih'; S.selected.clear(); S.until = null; S.period = null; S.filter = null; S.found = null; S.draft = [];
   history.clear();
   await usePdf(pdf);
@@ -909,6 +1006,7 @@ export async function openWork(file, pdf, onHome) {
       <div id="hint" hidden></div>
       <div id="selbar" class="glass" hidden></div>
       <div id="dock" class="glass"><div class="lens"></div>${MODES.map(([id, label]) => `<button data-mode="${id}">${icon(id)}<span>${label}</span></button>`).join('')}</div>
+      <div id="aids" class="glass" hidden>${[['cross', 'silang', 'Garis silang'], ['loupe', 'lup', 'Kaca pembesar'], ['ortho', 'ortho', 'Ortho: datar atau tegak (F8)'], ['polar', 'polar', 'Polar: tiap 15 derajat (F10)']].map(([k, i, t]) => `<button data-aid="${k}" aria-pressed="false" aria-label="${t}" title="${t}">${icon(i)}</button>`).join('')}</div>
       <div id="zoom" class="glass"><button data-a="zout" aria-label="Perkecil">−</button><button data-a="zfit" aria-label="Pas layar">100%</button><button data-a="zin" aria-label="Perbesar">+</button></div>
     </div>`;
   board = createBoard($('#plan'), handlers);
@@ -949,6 +1047,7 @@ async function onClick(e) {
   const b = e.target.closest('button');
   if (!b || !S.file) return;
   const d = b.dataset;
+  if (d.aid) return toggleAid(d.aid);
   if (d.mode) return setMode(d.mode);
   if (d.tool) return setTool(d.tool);
   if (d.stage) { S.stage = d.stage; move(b, [{ transform: 'scale(.9)' }, { transform: 'scale(1.06)' }, { transform: 'none' }]); renderStages(); if (S.tool !== 'kuas' && !S.selected.size) setMode('progres', 'kuas'); return; }
@@ -961,6 +1060,7 @@ async function onClick(e) {
     zin: () => board.zoomBy(1.5), zout: () => board.zoomBy(1 / 1.5), zfit: () => board.fit(),
     date: P.dateDialog,
     copy: P.copyDialog,
+    props: () => { closeAll(); P.elementsPanel({ quiet: true }); },
     'period-off': () => { S.period = null; refresh(); },
     'vertex-del': removeSelectedVertex,
     undate: P.undateDialog,
@@ -973,6 +1073,19 @@ async function onClick(e) {
   };
   actions[d.a]?.();
 }
+/** Ubah rupa elemen terpilih (tebal garis, ukuran titik, bentuk titik). `record` false = pratinjau saat digeser. */
+export function restyle(patch, record = true) {
+  const apply = () => {
+    const real = selected().map((e) => M.realize(project(), e));
+    for (const el of real) {
+      if (patch.w !== undefined && el.shape === 'line') el.w = patch.w;
+      if (patch.r !== undefined && el.shape === 'point') el.r = patch.r;
+      if (patch.style && el.shape === 'point') el.style = patch.style;
+    }
+    S.selected = new Set(real.map((e) => e.id));
+  };
+  if (record) { if (patch.w !== undefined) { prefs.lineW = patch.w; savePrefs(); } change(apply); } else { apply(); board.redraw(); }
+}
 export function deleteSelected() {
   const list = selected();
   if (!list.length) return;
@@ -981,15 +1094,31 @@ export function deleteSelected() {
   toast(`${list.length} elemen dihapus`, { label: 'Urungkan', run: undo });
 }
 
+export function keyUp(e) {
+  if (e.key === 'Shift' && shift) { shift = false; board?.retrack(); }
+  if (e.key === ' ' && board) { board.state.space = false; $('#plan').style.cursor = $('#plan').dataset.cursor ?? ''; }
+}
 export function key(e) {
-  if (!S.file || e.target.closest?.('input, textarea, select')) return;
+  if (!S.file) return;
   const k = e.key.toLowerCase();
+  if (e.target.closest?.('input, textarea, select')) { if (k === 'escape') e.target.blur(); return; }
+  if (k === 'shift') { shift = true; board.retrack(); return; }
+  if (k === 'f8' || k === 'f10') { e.preventDefault(); return toggleAid(k === 'f8' ? 'ortho' : 'polar'); }
+  // tahan spasi: geser gambar tanpa ganti alat
+  if (k === ' ') { if (e.target.closest?.('button')) return; e.preventDefault(); board.state.space = true; $('#plan').style.cursor = 'grab'; return; }
+  if ((e.ctrlKey || e.metaKey) && k === 'a' && !dialogOpen()) { e.preventDefault(); if (S.tool !== 'pilih') selectTool(); S.selected = new Set(elements().map((x) => x.id)); return refresh(); }
+  if (k.startsWith('arrow') && editing() && S.selected.size && !dialogOpen()) {
+    e.preventDefault();
+    const step = (e.shiftKey ? 10 : 1) / board.view.k;
+    const dx = k === 'arrowleft' ? -step : k === 'arrowright' ? step : 0, dy = k === 'arrowup' ? -step : k === 'arrowdown' ? step : 0;
+    return change(() => { const real = selected().map((x) => M.realize(project(), x)); for (const el of real) M.moveElement(el, dx, dy); S.selected = new Set(real.map((x) => x.id)); });
+  }
   if ((e.ctrlKey || e.metaKey) && k === 'z') { e.preventDefault(); return e.shiftKey ? redo() : undo(); }
   if ((e.ctrlKey || e.metaKey) && k === 'y') { e.preventDefault(); return redo(); }
   if ((e.ctrlKey || e.metaKey) && k === 's') { e.preventDefault(); return P.savePkp(); }
   if (e.ctrlKey || e.metaKey) return;
-  if (k === 'escape') { if (closeWheel()) return; if (isOpen()) return closeTop(); S.draft = []; S.selected.clear(); if (S.found) cancelFound(); return refresh(); }
-  if (isOpen()) return;
+  if (k === 'escape') { e.preventDefault(); return escape(); }
+  if (dialogOpen()) return;
   if (k === 'enter') { e.preventDefault(); if (S.draft.length) finishDraft(); else if (S.selected.size) P.dateDialog(); }
   else if ((k === 'delete' || k === 'backspace') && S.draft.length) { S.draft.pop(); refresh(); }
   else if (k === 'delete') { if (editing() && S.vertex !== null && S.selected.size === 1) removeSelectedVertex(); else deleteSelected(); }

@@ -13,6 +13,8 @@ const I = {
   legenda: 'M3 4h18v16H3zM7 9h2M12 9h5M7 15h2M12 15h5',
   lurus: 'M3 7l17-3 1 13-17 3zM7 12h10M12 9v6',
   ubah: 'M3 3h6v6H3zM15 15h6v6h-6zM9 6h6v9M6 9v9h9',
+  'panah-pilih': 'M6 3l13 10h-6l3 7-3 1-3-7-4 4z',
+  silang: 'M12 2v20M2 12h20', lup: 'M10 4a6 6 0 100 12 6 6 0 000-12zM15 15l6 6M10 7v6M7 10h6', ortho: 'M5 3v16h16M5 13h6v6', polar: 'M4 20h17M4 20L16 5M13 20a9 9 0 00-3-7',
   mata: 'M2 12l5-6h10l5 6-5 6H7zM10 9h4l1 2v2l-1 2h-4l-1-2v-2z', trash: 'M4 7h16M9 7V4h6v3M6 7l1 14h10l1-14M10 11v6M14 11v6', salin: 'M9 8h11v13H9zM4 16V3h11v2', putar: 'M19 8l-3-3H8l-4 4v7l4 4h8l3-3M19 3v5h-5', foto: 'M3 7h4l2-3h6l2 3h4v13H3zM12 10a4 4 0 100 8 4 4 0 000-8z', berkas: 'M5 2h10l4 4v16H5zM15 2v4h4', panel: 'M3 4h18v16H3zM9 4v16M5 8h2M5 11h2', geser: 'M12 3v18M3 12h18M9 6l3-3 3 3M9 18l3 3 3-3',
 };
 export const icon = (n) => `<svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="${I[n] ?? ''}"/></svg>`;
@@ -31,7 +33,7 @@ export const stagger = (els, ms = 250, step = 22) => els.slice(0, 24).forEach((e
 /* ---------- lembar dan dialog ---------- */
 const stack = [];
 /** kind: 'dialog' (tengah; lembar bawah di HP) atau 'panel' (kanan; lembar bawah di layar sempit). */
-export function sheet({ title, sub = '', body = '', kind = 'dialog', wide = false, onClose }) {
+export function sheet({ title, sub = '', body = '', kind = 'dialog', wide = false, quiet = false, onClose }) {
   if (kind === 'panel') stack.filter((s) => s.kind === 'panel').forEach((s) => s.close());
   const el = document.createElement('section');
   el.className = `sheet ${kind}${wide ? ' wide' : ''}`;
@@ -51,7 +53,7 @@ export function sheet({ title, sub = '', body = '', kind = 'dialog', wide = fals
   move(el, [{ transform: away, opacity: kind === 'dialog' && !bottom ? 0 : 1 }, { transform: 'none', opacity: 1 }], kind === 'panel' || bottom ? 340 : 250);
   let closed = false, gone = () => {};
   const api = {
-    el, kind, body: $('.body', el),
+    el, kind, quiet, body: $('.body', el),
     closed: new Promise((resolve) => { gone = resolve; }),
     close(value) {
       if (closed) return;
@@ -91,7 +93,8 @@ function drag(el, api) {
 export const closeTop = () => { stack.at(-1)?.close(); };
 export const closeAll = () => [...stack].forEach((s) => s.close());
 export const isOpen = () => stack.length > 0;
-export const panelOpen = () => stack.some((s) => s.kind === 'panel');
+export const panelOpen = () => stack.some((s) => s.kind === 'panel' && !s.quiet);
+export const dialogOpen = () => stack.some((s) => s.kind === 'dialog');
 
 export const ask = (title, message, confirm = 'Ya', danger = false) => new Promise((resolve) => {
   const s = sheet({ title, body: `<p class="msg">${esc(message)}</p><div class="pair"><button class="soft" data-no>Batal</button><button class="${danger ? 'danger' : 'solid'}" data-yes>${esc(confirm)}</button></div>`, onClose: (v) => resolve(v === true) });

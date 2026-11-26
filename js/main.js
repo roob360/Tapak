@@ -150,6 +150,7 @@ const newDialog = (pages) => new Promise((resolve) => {
 
 W.applyTheme();
 addEventListener('keydown', W.key);
+addEventListener('keyup', W.keyUp);
 addEventListener('resize', () => requestAnimationFrame(W.relayout));
 // aplikasi latar bisa ditutup sistem tanpa pemberitahuan: simpan segera
 addEventListener('visibilitychange', () => { if (document.hidden) W.flush(); W.getBoard()?.reset(); });
