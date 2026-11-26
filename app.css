@@ -90,10 +90,10 @@ svg.i { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-widt
 #work.lefty #zoom { right: auto; left: calc(14px + env(safe-area-inset-left)); }
 #dock { position: absolute; left: 50%; translate: -50% 0; bottom: calc(14px + env(safe-area-inset-bottom)); display: flex; padding: 5px; z-index: 3; }
 #dock button { width: 84px; min-height: 54px; flex-direction: column; gap: 2px; font-size: 12px; padding: 0; position: relative; z-index: 1; }
-#zoom { position: absolute; right: calc(14px + env(safe-area-inset-right)); bottom: calc(20px + env(safe-area-inset-bottom)); display: flex; align-items: center; padding: 2px; z-index: 3; }
+#zoom { position: absolute; right: calc(14px + env(safe-area-inset-right)); bottom: calc(20px + env(safe-area-inset-bottom)); display: flex; align-items: center; padding: 4px; z-index: 3; }
 #zoom button { padding: 0 8px; font-weight: 600; }
 #zoom [data-a=zfit] { min-width: 64px; }
-#aids { position: absolute; right: calc(190px + env(safe-area-inset-right)); bottom: calc(20px + env(safe-area-inset-bottom)); display: flex; padding: 2px; z-index: 3; }
+#aids { position: absolute; right: calc(190px + env(safe-area-inset-right)); bottom: calc(20px + env(safe-area-inset-bottom)); display: flex; gap: 4px; padding: 4px; z-index: 3; }
 #aids button { width: 44px; padding: 0; }
 #aids button[aria-pressed=true] { background: var(--accent); color: var(--on); }
 #work.lefty #aids { right: auto; left: calc(190px + env(safe-area-inset-left)); }
