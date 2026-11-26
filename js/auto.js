@@ -158,7 +158,7 @@ export function crop(g, w, [x, y, cw, ch]) {
  * Cari serupa: `box` [x,y,w,h] = contoh. Pencarian kasar pada citra diperkecil, lalu diperhalus pada ukuran penuh.
  * Return [{ x, y, w, h, score }] (pojok kiri atas), tidak saling tumpang tindih.
  */
-export function findSimilar(gray, w, h, box, { threshold = 0.75, rotations = true, sample: given = null } = {}) {
+export function findSimilar(gray, w, h, box, { threshold = 0.75, rotations = true, sample: given = null, margin = 0.2 } = {}) {
   const [bx, by, bw, bh] = box.map(Math.round);
   if (!given && (bw < 6 || bh < 6 || bx < 0 || by < 0 || bx + bw > w || by + bh > h)) return [];
   const sample = given ?? crop(gray, w, [bx, by, bw, bh]);
@@ -172,7 +172,9 @@ export function findSimilar(gray, w, h, box, { threshold = 0.75, rotations = tru
     const full = prepare(v);
     if (!full.norm) continue;
     for (let y = 0; y + coarse.h <= small.h; y++) for (let x = 0; x + coarse.w <= small.w; x++) {
-      if (score(small.g, small.w, coarse, x, y) < threshold - 0.2) continue;
+      if (score(small.g, small.w, coarse, x, y) < threshold - margin) continue;
+      // sudah ada hasil bagus di dekat sini: tidak perlu diperhalus lagi
+      if (found.some((k) => k.w === v.w && k.score > 0.92 && Math.abs(k.x - x * f) < v.w * 0.4 && Math.abs(k.y - y * f) < v.h * 0.4)) continue;
       let best = null;
       for (let Y = Math.max(0, y * f - f); Y <= Math.min(h - v.h, y * f + f); Y++) for (let X = Math.max(0, x * f - f); X <= Math.min(w - v.w, x * f + f); X++) {
         const s = score(gray, w, full, X, Y);

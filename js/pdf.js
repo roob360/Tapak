@@ -47,6 +47,14 @@ export async function openPdf(bytes) {
       await page.render({ canvasContext: g, canvas: c, viewport }).promise;
       return c;
     },
+    /** Render sebagian halaman: rect = [x, y, lebar, tinggi] dalam titik, `scale` = piksel per titik. Return { canvas, task }. */
+    async region(i, [x, y, w, h], scale) {
+      const page = await doc.getPage(i + 1);
+      const viewport = page.getViewport({ scale, offsetX: -x * scale, offsetY: -y * scale });
+      const [c, g] = canvasOf(w * scale, h * scale);
+      const task = page.render({ canvasContext: g, canvas: c, viewport });
+      return { canvas: c, task };
+    },
     /** Nama lembar disimpan sebagai bookmark PDF. */
     async names() {
       const out = new Array(doc.numPages).fill(null);

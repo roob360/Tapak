@@ -28,7 +28,7 @@ const HINT = {
 
 const PREFS_KEY = 'tapak.prefs';
 export const prefs = {
-  alpha: 0.35, cross: true, loupe: true, ortho: false, polar: false, autoProps: true, lineW: 0, names: true, labelTop: true, author: '', leftHand: false, finger: false, straighten: true, wheel: true, snap: true, theme: 'sistem', strip: true, sequential: false,
+  alpha: 0.35, pointR: 0, cross: true, loupe: true, ortho: false, polar: false, autoProps: true, lineW: 0, names: true, labelTop: true, author: '', leftHand: false, finger: false, straighten: true, wheel: true, snap: true, theme: 'sistem', strip: true, sequential: false,
   colorMode: 'tahap', dates: true, pct: true, similarity: 80,
   favorites: [
     { name: 'Revisi', brush: 'pulpen', color: '#ff383c', size: 2.5, op: 1, pressure: 0.7, smooth: 0.35 },
@@ -269,10 +269,9 @@ function paintAt(p) {
 }
 
 const newElement = (shape, pts, extra = {}) => ({ page: S.page, shape, pts: pts.map((p) => [Math.round(p[0] * 100) / 100, Math.round(p[1] * 100) / 100]), ...extra });
-const pointRadius = () => {
-  const same = M.elementsOn(project(), S.page).filter((e) => e.shape === 'point' && e.r);
-  return same.length ? same.at(-1).r : Math.max(4, Math.min(30, Math.max(...S.view.sizes[S.page]) / 200));
-};
+/** Ukuran titik otomatis: sebanding dengan ukuran lembar. */
+export const autoRadius = () => Math.round(Math.max(4, Math.min(30, Math.max(...S.view.sizes[S.page]) / 200)) * 10) / 10;
+const pointRadius = () => prefs.pointR || autoRadius();
 function add(shape, pts, extra) {
   let made;
   if (shape === 'line' && prefs.lineW) extra = { w: prefs.lineW, ...extra };
@@ -443,6 +442,7 @@ function syncProps() {
   }
 }
 
+let detailTask = null;
 const AIMING = { petakan: ['titik', 'garis', 'area', 'kotak', 'bulat'], otomatis: ['skala', 'cari', 'ruang'] };
 const aiming = () => !!S.found || (AIMING[S.mode] ?? []).includes(S.tool) || (editing() && !!S.editDrag);
 let shift = false;
@@ -470,6 +470,15 @@ function renderAids() {
 }
 
 const handlers = {
+  /** Bagian halaman dirender tajam untuk zoom tinggi; render sebelumnya dibatalkan. */
+  async detail(rect, scale) {
+    detailTask?.cancel();
+    if (!S.view) return null;
+    const { canvas, task } = await S.view.region(S.page, rect, Math.min(scale, 4600 / Math.max(rect[2], rect[3])));
+    detailTask = task;
+    await task.promise;
+    return canvas;
+  },
   guides: () => (aiming() ? { cross: prefs.cross, loupe: prefs.loupe } : null),
   aimPoint: (p) => constrain(p, anchor()),
   insets: () => {
@@ -539,6 +548,13 @@ const handlers = {
       g.setLineDash(c.on ? [6 * px, 4 * px] : [2 * px, 5 * px]);
       if (c.on) g.fillRect(c.x, c.y, c.w, c.h);
       g.strokeRect(c.x, c.y, c.w, c.h);
+      g.setLineDash([]);
+      g.font = `700 ${11 * px}px Inter, system-ui, sans-serif`;
+      g.lineWidth = 3 * px;
+      g.strokeStyle = '#fff';
+      g.strokeText(`${Math.round(c.score * 100)}%`, c.x, c.y - 3 * px);
+      g.fillStyle = '#9a3412';
+      g.fillText(`${Math.round(c.score * 100)}%`, c.x, c.y - 3 * px);
       g.restore();
     }
   },
@@ -828,6 +844,19 @@ const autoRoom = (p) => job('Mencari tepi ruangan…', async () => {
   };
 });
 
+const FLOOR = 55; // kemiripan terendah yang bisa dipilih: pencarian selalu dilakukan sampai batas ini
+/** Terapkan pilihan kemiripan pada hasil yang sudah ada, tanpa scan ulang. */
+export function applySimilarity(value) {
+  const f = S.found;
+  if (!f) return;
+  f.similarity = prefs.similarity = value;
+  savePrefs();
+  const passed = (f.all_ ?? []).filter((c) => c.score * 100 >= value - 0.5);
+  f.list = passed.filter((c) => !c.taken);
+  f.known = passed.length - f.list.length;
+  board.redraw();
+}
+
 /** Cari simbol: kotak contoh -> daftar hasil yang bisa diterima atau dibuang. */
 export function search(box) {
   const found = S.found ?? { list: [], samples: [], all: false, similarity: prefs.similarity, area: S.area, known: 0 };
@@ -847,7 +876,6 @@ export function search(box) {
     }
     const pages = found.all ? [...Array(S.view.pages).keys()] : [...new Set(found.samples.map((s) => s.page))];
     const area = found.area;
-    let known = 0;
     /** Area yang sama (sebanding) berlaku di lembar lain. */
     const within = (page, [mx, my]) => {
       if (!area || area === 'all') return true;
@@ -858,25 +886,25 @@ export function search(box) {
       const bmp = await bitmapOf(page);
       const k = await loadImage(bmp, S.view.sizes[page][0]);
       for (const t of templates) {
-        const hits = await call('similar', { box: [0, 0, t.w, t.h], sample: { g: t.g, w: t.w, h: t.h }, threshold: found.similarity / 100, rotations: true });
+        const hits = await call('similar', { box: [0, 0, t.w, t.h], sample: { g: t.g, w: t.w, h: t.h }, threshold: FLOOR / 100, margin: 0.12, rotations: true });
+        hits.sort((a, b) => b.score - a.score);
         for (const f of hits) {
-          const c = { page, x: f.x / k, y: f.y / k, w: f.w / k, h: f.h / k, on: true };
+          const c = { page, x: f.x / k, y: f.y / k, w: f.w / k, h: f.h / k, score: f.score, on: true };
           const mid = [c.x + c.w / 2, c.y + c.h / 2];
           const near = (o) => Math.abs(o.x + o.w / 2 - mid[0]) < c.w * 0.6 && Math.abs(o.y + o.h / 2 - mid[1]) < c.h * 0.6;
           if (!within(page, mid) || results.some((o) => o.page === page && near(o))) continue;
-          if (M.pointTaken(project(), page, mid, Math.max(c.w, c.h))) { known++; continue; }
-          const before = found.list.find((o) => o.page === page && near(o));
-          results.push({ ...c, on: before ? before.on : true });
+          const before = found.all_?.find((o) => o.page === page && near(o));
+          results.push({ ...c, on: before ? before.on : true, taken: M.pointTaken(project(), page, mid, Math.max(c.w, c.h)) });
         }
       }
     }
     return () => {
       if (S.found !== found) return;
-      found.list = results;
-      found.known = known;
+      found.all_ = results; // semua kandidat sampai batas terendah; daftar tampil disaring menurut slider
+      applySimilarity(found.similarity);
       P.found();
-      board.redraw();
-      toast(results.length ? `${results.length} ditemukan${known ? `, ${known} dilewati karena sudah ada` : ''}` : known ? `Tidak ada yang baru: ${known} tempat sudah bertitik` : 'Tidak ditemukan. Turunkan kemiripan atau tambah contoh.');
+      const n = found.list.length, known = found.known;
+      toast(n ? `${n} ditemukan${known ? `, ${known} dilewati karena sudah ada` : ''}` : known ? `Tidak ada yang baru: ${known} tempat sudah bertitik` : 'Tidak ditemukan. Turunkan kemiripan atau tambah contoh.');
     };
   });
 }
@@ -922,7 +950,7 @@ function renderRail(animate) {
     b.classList.toggle('flag', (id === 'hingga' && !!S.until) || (id === 'rekap' && !!S.period));
   }
   lens(rail);
-  if (animate) { move(rail, [{ opacity: 0, translate: `${prefs.leftHand ? 16 : -16}px -50%` }, { opacity: 1, translate: '0 -50%' }]); $$('button', rail).forEach((b, i) => move(b, [{ opacity: 0, transform: 'scale(.7)' }, { opacity: 1, transform: 'none' }], 250, { delay: i * 28, fill: 'backwards' })); }
+  if (animate) { move(rail, innerWidth <= 800 ? [{ opacity: 0 }, { opacity: 1 }] : [{ opacity: 0, translate: `${prefs.leftHand ? 16 : -16}px -50%` }, { opacity: 1, translate: '0 -50%' }]); $$('button', rail).forEach((b, i) => move(b, [{ opacity: 0, transform: 'scale(.7)' }, { opacity: 1, transform: 'none' }], 250, { delay: i * 28, fill: 'backwards' })); }
 }
 function renderDock() {
   const dock = $('#dock');
@@ -996,7 +1024,7 @@ export function refresh() {
   updatePercents();
   $('[data-a="redo"]').disabled = !history.canRedo;
   const hint = $('#hint'), text = S.found ? 'Ketuk kotak untuk membuang atau menyertakan. Tarik kotak untuk menambah contoh.' : (editing() ? HINT.ubah : HINT[S.tool] ?? '');
-  if (hint.textContent !== text) { hint.textContent = text; hint.hidden = !text; clearTimeout(hintTimer); if (text) { move(hint, [{ opacity: 0, translate: '-50% -6px' }, { opacity: 1, translate: '-50% 0' }]); hintTimer = setTimeout(() => finished(move(hint, [{ opacity: 1 }, { opacity: 0 }], 340)).then(() => { hint.hidden = true; }), 5000); } }
+  if (hint.textContent !== text) { hint.textContent = text; hint.hidden = !text; clearTimeout(hintTimer); if (text) { move(hint, innerWidth <= 800 ? [{ opacity: 0 }, { opacity: 1 }] : [{ opacity: 0, translate: '-50% -6px' }, { opacity: 1, translate: '-50% 0' }]); hintTimer = setTimeout(() => finished(move(hint, [{ opacity: 1 }, { opacity: 0 }], 340)).then(() => { hint.hidden = true; }), 5000); } }
   syncProps();
   P.refresh();
   board.redraw();
@@ -1118,13 +1146,18 @@ export function restyle(patch, record = true) {
   const apply = () => {
     const real = selected().map((e) => M.realize(project(), e));
     for (const el of real) {
-      if (patch.w !== undefined && el.shape === 'line') el.w = patch.w;
-      if (patch.r !== undefined && el.shape === 'point') el.r = patch.r;
+      if (patch.w !== undefined && el.shape === 'line') { if (patch.w) el.w = patch.w; else delete el.w; } // 0 = otomatis
+      if (patch.r !== undefined && el.shape === 'point') el.r = patch.r || autoRadius();
       if (patch.style && el.shape === 'point') el.style = patch.style;
     }
     S.selected = new Set(real.map((e) => e.id));
   };
-  if (record) { if (patch.w !== undefined) { prefs.lineW = patch.w; savePrefs(); } change(apply); } else { apply(); board.redraw(); }
+  if (record) {
+    if (patch.w !== undefined) prefs.lineW = patch.w;
+    if (patch.r !== undefined) prefs.pointR = patch.r;
+    savePrefs();
+    change(apply);
+  } else { apply(); board.redraw(); }
 }
 export function deleteSelected() {
   const list = selected();

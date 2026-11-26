@@ -203,6 +203,8 @@ td .meter { width: 90px; margin-top: 4px; }
   #hint { top: calc(138px + env(safe-area-inset-top)); }
   #strip { top: 142px; }
   #zoom { bottom: calc(90px + env(safe-area-inset-bottom)); }
+  .sheet.panel { top: calc(140px + env(safe-area-inset-top)); bottom: calc(92px + env(safe-area-inset-bottom)); }
+  #selbar { bottom: calc(148px + env(safe-area-inset-bottom)); }
 }
 /* HP */
 @media (max-width: 800px) {
@@ -218,6 +220,18 @@ td .meter { width: 90px; margin-top: 4px; }
   .sheet.panel, .sheet.dialog, .sheet.dialog.wide { left: 0; right: 0; top: auto; bottom: 0; translate: none; width: auto; max-height: 82%; border-radius: 28px 28px 0 0; }
   .grip { display: block; align-self: center; width: 60px; height: 22px; min-height: 22px; padding: 0; position: relative; touch-action: none; cursor: grab; }
   .grip::after { content: ""; position: absolute; left: 5px; right: 5px; top: 9px; height: 5px; border-radius: 3px; background: var(--line); }
+  /* tumpukan bawah: dok, lalu zoom dan bantu bidik, lalu bilah pilihan */
   #zoom { right: 8px; }
+  #zoom [data-a=zin], #zoom [data-a=zout] { display: none; }
+  #selbar { bottom: calc(148px + env(safe-area-inset-bottom)); gap: 2px; padding: 5px; }
+  #selbar b { padding: 0 6px; font-size: 13px; }
+  #selbar button { padding: 0 9px; }
+  /* rel hanya ikon dan tidak masuk ke daerah petunjuk maupun bilah pilihan */
+  #rail, #work.nostrip #rail { top: calc(134px + env(safe-area-inset-top)); bottom: calc(208px + env(safe-area-inset-bottom)); translate: none; height: fit-content; max-height: calc(100% - 342px - env(safe-area-inset-top) - env(safe-area-inset-bottom)); margin: auto 0; }
+  #rail button { width: 44px; min-height: 44px; }
+  #rail button span { display: none; }
+  #hint { left: calc(76px + env(safe-area-inset-left)); right: 8px; translate: none; margin: 0 auto; max-width: none; width: fit-content; }
+  #work.lefty #hint { left: 8px; right: 76px; }
+  #toast { bottom: calc(206px + env(safe-area-inset-bottom)); }
 }
 @media (prefers-reduced-motion: reduce) { * { transition-duration: 0s !important; } }

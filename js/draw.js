@@ -37,7 +37,7 @@ export function drawMarks(g, project, els, stages, o) {
       if (el.style === 'bulat') g.arc(el.pts[0][0], el.pts[0][1], r, 0, Math.PI * 2);
       else g.rect(el.pts[0][0] - r, el.pts[0][1] - r, r * 2, r * 2);
     };
-    const width = el.shape === 'line' ? el.w ?? Math.max(3, 6 * px) : 2.5 * px;
+    const width = el.shape === 'line' ? el.w ?? 6 * px : 2.5 * px; // tanpa w = otomatis: tebalnya tetap di layar pada zoom berapa pun
     trace();
     if (sel) {
       g.strokeStyle = '#1c1c1e'; g.lineWidth = width + 8 * px; g.stroke();

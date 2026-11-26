@@ -8,6 +8,7 @@ import { warp, homography, apply, rotation, skewAngle } from '../js/warp.js';
 import { findRoom, findSimilar, binarize, crop } from '../js/auto.js';
 import { toXlsx, col } from '../js/export.js';
 import { week, shift, periodReport, volumes } from '../js/report.js';
+import { DEFAULTS, values, buildName } from '../js/naming.js';
 
 function sample() {
   const p = P.emptyProject('a.pdf', 3);
@@ -192,4 +193,13 @@ test('scan ulang tidak menaruh titik dobel di tempat yang sama', () => {
   assert.equal(M.addCandidates(p, 0, [box(302, 12)]), 0);
   M.addElement(p, { page: 0, shape: 'poly', pts: [[390, 0], [430, 0], [430, 40], [390, 40]] });
   assert.equal(M.addCandidates(p, 0, [box(400, 10)]), 1);
+});
+
+test('nama berkas ekspor dari bagian terpilih', () => {
+  const v = values('pdf', { fileName: 'ARS_Dinding_Gedung A.pkp', period: { from: '2026-11-23', to: '2026-11-29' }, percent: 25, today: '2026-11-26', sheet: 'Lantai 1' });
+  assert.equal(buildName(DEFAULTS.pdf, v), 'ARS_Dinding_Gedung A_Laporan_23-11 sd 29-11-2026');
+  assert.equal(buildName(['tanggal', 'disiplin'], v), 'ARS_26-11-2026');
+  assert.equal(buildName([], v), 'Dinding');
+  const loose = values('pkp', { fileName: 'denah/1.pkp', today: '2026-11-26' });
+  assert.equal(buildName(DEFAULTS.pkp, loose), 'denah-1');
 });

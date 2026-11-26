@@ -1,7 +1,7 @@
 // Papan kerja: kamera (zoom berbatas), kanvas, dan penerjemah masukan pen / jari / mouse.
 // Dunia = titik halaman PDF. view.k = piksel layar per titik.
 
-const ZOOM_MAX = 8; // kali ukuran pas layar; batas kecilnya = pas layar
+const ZOOM_MAX = 32; // kali ukuran pas layar (3200%); batas kecilnya = pas layar
 
 export function createBoard(canvas, h) {
   const g = canvas.getContext('2d');
@@ -34,7 +34,27 @@ export function createBoard(canvas, h) {
   }
   const around = (q, k) => ({ k, x: q[0] - (q[0] - view.x) * (k / view.k), y: q[1] - (q[1] - view.y) * (k / view.k) });
 
-  function set(v) { Object.assign(view, v); cache = null; redraw(); h.zoomed(view.k / fitK); }
+  // lapisan tajam: sesudah kamera diam, bagian yang terlihat dirender ulang dari PDF
+  let detail = null, detailTimer = 0, detailId = 0;
+  function sharpen() {
+    clearTimeout(detailTimer);
+    const id = ++detailId;
+    detailTimer = setTimeout(async () => {
+      if (!image) return;
+      const d = dpr(), want = view.k * d;
+      if (want <= (image.width / size[0]) * 1.15) { detail = null; return; }
+      const [x0, y0] = toWorld([0, 0]), [x1, y1] = toWorld([canvas.clientWidth, canvas.clientHeight]);
+      const x = Math.max(0, x0), y = Math.max(0, y0), w = Math.min(size[0], x1) - x, ht = Math.min(size[1], y1) - y;
+      if (w <= 0 || ht <= 0) return;
+      const rect = [x, y, w, ht];
+      const result = await h.detail(rect, want).catch(() => null);
+      if (!result || id !== detailId) return;
+      detail = { rect, canvas: result };
+      cache = null;
+      redraw();
+    }, 220);
+  }
+  function set(v) { Object.assign(view, v); cache = null; redraw(); h.zoomed(view.k / fitK); sharpen(); }
   function glide(to, ms = 250) {
     const from = { ...view }, id = ++anim, t0 = performance.now(), dur = state.still ? 1 : ms;
     const step = (t) => {
@@ -59,6 +79,7 @@ export function createBoard(canvas, h) {
     g.fillRect(0, 0, size[0], size[1]);
     g.restore();
     g.drawImage(image, 0, 0, size[0], size[1]);
+    if (detail) g.drawImage(detail.canvas, detail.rect[0], detail.rect[1], detail.rect[2], detail.rect[3]);
     h.paint(g, view.k);
   }
   function draw() {
@@ -307,6 +328,7 @@ export function createBoard(canvas, h) {
     fit(animate = true) { if (animate) glide(fitView(), 340); else set(fitView()); },
     zoomBy(f) { const a = area(); glide(clamp(around([a.x + a.w / 2, a.y + a.h / 2], Math.max(fitK, Math.min(fitK * ZOOM_MAX, view.k * f))))); },
     zoom: () => view.k / fitK,
+    sharpness: () => (detail ? detail.canvas.width / detail.rect[2] : 0),
     reveal() { if (image) glide(clamp(view)); },
     /** Geser seperlunya supaya titik dunia ini tidak tersembunyi di kanan batas `right` (piksel layar). */
     uncover(point, right) {
@@ -317,6 +339,8 @@ export function createBoard(canvas, h) {
     refit() { if (image) glide(view.k <= fitK * 1.01 ? fitView() : clamp(view)); },
     setPage(bmp, pageSize, keep = false) {
       anim++; // animasi kamera yang masih jalan tidak boleh menimpa halaman baru
+      detail = null;
+      detailId++;
       image = bmp;
       size = pageSize;
       cache = null;

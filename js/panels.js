@@ -7,6 +7,7 @@ import { arrangePages, renamePages, reportPdf, imageToPdf, openPdf, toBlob } fro
 import { toXlsx, deliver, safeName } from './export.js';
 import { drawAnnotation } from './draw.js';
 import { week, shift, periodReport, volumes } from './report.js';
+import { PARTS, DEFAULTS, values, buildName } from './naming.js';
 import { recapPages, paintSheet, sheetImage } from './page.js';
 import { pickFiles } from './pick.js';
 import { straighten } from './crop.js';
@@ -47,6 +48,12 @@ export function elementsPanel(options = {}) {
       const stage = d.check, list = W.selected(), all = list.every((x) => x.st?.[stage]);
       change(() => { for (const x of list) { const real = M.realize(project(), x); if (all) M.clearStages(W.stages(), real, stage); else if (!real.st?.[stage]) M.mark(W.stages(), real, stage, M.today(), prefs.sequential); S.selected.delete(x.id); S.selected.add(real.id); } });
       W.pop([...S.selected]);
+    } else if (d.auto) W.restyle({ [d.auto]: 0 });
+    else if (d.manual) {
+      const first = W.selected().find((x) => x.shape === (d.manual === 'w' ? 'line' : 'point'));
+      const unit = Math.max(...S.view.sizes[S.page]) / 1100;
+      // mulai dari ukuran yang sedang terlihat, sedikit digeser agar terbaca sebagai manual
+      W.restyle({ [d.manual]: d.manual === 'w' ? first.w ?? Math.round(6 * unit * 2) / 2 : Math.round((first.r ?? W.autoRadius()) * 2) / 2 + 0.5 });
     } else if (d.style) W.restyle({ style: d.style });
     else if (d.act === 'split') splitSides();
     else if (d.act === 'copy') copyDialog();
@@ -110,8 +117,11 @@ function look(sel) {
   const unit = Math.max(...S.view.sizes[S.page]) / 1100;
   const line = sel.find((e) => e.shape === 'line'), point = sel.find((e) => e.shape === 'point');
   const round = (v) => Math.round(v * 2) / 2;
-  return (line ? slider('w', 'Tebal garis', 1, 40, round(line.w ?? 6 * unit)) : '')
-    + (point ? slider('r', 'Ukuran titik', 2, 60, round(point.r ?? 9)) + `<div class="chips"><button class="${point.style !== 'bulat' ? 'solid' : 'soft'}" data-style="kotak">Kotak</button><button class="${point.style === 'bulat' ? 'solid' : 'soft'}" data-style="bulat">Bulat</button></div>` : '');
+  const mode = (key, title, auto) => `<p class="label">${title}</p><div class="grid2"><button class="${auto ? 'solid' : 'soft'}" data-auto="${key}">Otomatis</button><button class="${auto ? 'soft' : 'solid'}" data-manual="${key}">Manual</button></div>`;
+  const autoR = W.autoRadius();
+  const lineAuto = line && !line.w, pointAuto = point && Math.abs((point.r ?? autoR) - autoR) < 0.05;
+  return (line ? mode('w', 'Tebal garis', lineAuto) + (lineAuto ? '' : slider('w', 'Tebal', 0.5, 40, round(line.w))) : '')
+    + (point ? mode('r', 'Ukuran titik', pointAuto) + (pointAuto ? '' : slider('r', 'Ukuran', 1, 60, round(point.r))) + `<div class="chips"><button class="${point.style !== 'bulat' ? 'solid' : 'soft'}" data-style="kotak">Kotak</button><button class="${point.style === 'bulat' ? 'solid' : 'soft'}" data-style="bulat">Bulat</button></div>` : '');
 }
 function measure(el) {
   const m = project().takeoff.scales?.[S.page];
@@ -427,6 +437,7 @@ export function brushes() {
 }
 
 /* ---------- hasil cari simbol ---------- */
+const summary = () => { const f = S.found; return `${f.list.length} baru dari ${f.samples.length} contoh${f.known ? ` · ${f.known} sudah bertitik, dilewati` : ''} · ${!f.area || f.area === 'all' ? 'seluruh lembar' : 'di dalam area'}`; };
 export function found() {
   const f = S.found;
   if (!f) return;
@@ -439,10 +450,20 @@ export function found() {
       if (b.dataset.act === 'accept') W.acceptFound();
       if (b.dataset.act === 'cancel') s.close();
     });
-    s.el.addEventListener('change', (e) => { if (S.found && e.target.type === 'range') { S.found.similarity = prefs.similarity = Number(e.target.value); savePrefs(); W.search(); } });
+    // geser slider: angka, kotak, dan jumlah langsung berubah (hasil disaring, tidak scan ulang)
+    s.el.addEventListener('input', (e) => {
+      if (!S.found || e.target.type !== 'range') return;
+      W.applySimilarity(Number(e.target.value));
+      e.target.nextElementSibling.value = `${e.target.value}%`;
+      const n = S.found.list.filter((c) => c.on).length;
+      const accept = $('[data-act="accept"]', s.el);
+      accept.textContent = `Terima ${n}`;
+      accept.disabled = !n;
+      $('.sub', s.el).textContent = summary();
+    });
   }
   const n = f.list.filter((c) => c.on).length;
-  open.found.update(`<p class="sub">${f.list.length} baru dari ${f.samples.length} contoh${f.known ? ` · ${f.known} sudah bertitik, dilewati` : ''} · ${!f.area || f.area === 'all' ? 'seluruh lembar' : 'di dalam area'}</p>
+  open.found.update(`<p class="sub">${summary()}</p>
     <p class="label">Cari di</p><div class="grid2"><button class="${f.all ? 'soft' : 'solid'}" data-scope="one">Lembar ini</button><button class="${f.all ? 'solid' : 'soft'}" data-scope="all">Semua lembar</button></div>
     <label class="range">Kemiripan<input type="range" min="55" max="95" step="5" value="${f.similarity}"><output>${f.similarity}%</output></label>
     <p class="hint">Ketuk kotak di gambar untuk membuang yang salah. Tarik kotak lain untuk menambah contoh. Hasil menjadi kandidat, belum masuk rekap.</p>
@@ -461,6 +482,10 @@ export function viewPanel(focus) {
       <label class="range">Kepekatan<input type="range" data-k="alpha" min="0" max="100" step="5" value="${alpha}"><output>${alpha}%</output></label>
       <div class="chips">${[[20, 'Tipis'], [35, 'Nyaman'], [65, 'Tebal'], [100, 'Penuh']].map(([v, n]) => `<button class="soft" data-alpha="${v}">${n}</button>`).join('')}</div>
       <p class="label">Tulisan di penanda</p>${sw('pct', 'Persen progres', prefs.pct)}${sw('dates', 'Tanggal', prefs.dates)}${sw('names', 'Nama elemen', prefs.names)}${sw('labelTop', 'Label area di tepi atas', prefs.labelTop)}
+      <p class="label">Penanda baru</p>
+      <label class="range">Tebal garis<input type="range" data-k="lineW" min="0" max="30" step="0.5" value="${prefs.lineW}"><output>${prefs.lineW || 'oto'}</output></label>
+      <label class="range">Ukuran titik<input type="range" data-k="pointR" min="0" max="40" step="0.5" value="${prefs.pointR}"><output>${prefs.pointR || 'oto'}</output></label>
+      <p class="hint">Geser ke paling kiri untuk Otomatis.</p>
       <p class="label">Legenda</p>${sw('legend', 'Tampilkan legenda', legend.on !== false)}
       <label class="range">Ukuran<input type="range" data-k="scale" min="50" max="400" step="10" value="${scale}"><output>${scale}%</output></label>
       <div class="grid2">${[['atas-kiri', 'Kiri atas'], ['atas-kanan', 'Kanan atas'], ['bawah-kiri', 'Kiri bawah'], ['bawah-kanan', 'Kanan bawah']].map(([v, n]) => `<button class="soft" data-corner="${v}">${n}</button>`).join('')}</div>
@@ -502,6 +527,11 @@ export function viewPanel(focus) {
   s.el.addEventListener('input', (e) => {
     const t = e.target;
     if (t.dataset.k === 'alpha') setAlpha(Number(t.value));
+    if (t.dataset.k === 'lineW' || t.dataset.k === 'pointR') {
+      prefs[t.dataset.k] = Number(t.value);
+      savePrefs();
+      t.nextElementSibling.value = Number(t.value) || 'oto';
+    }
     if (t.dataset.k === 'scale') {
       before ??= JSON.stringify(project().progress.legend);
       project().progress.legend.scale = Number(t.value) / 100;
@@ -541,12 +571,63 @@ export function settings() {
   });
 }
 
+/* ---------- nama berkas ekspor ---------- */
+const EXT = { pkp: '.pkp', xlsx: '.xlsx', pdf: '.pdf', png: '.png' };
+/** Dialog nama berkas. Bagian yang dipilih diingat per jenis. Return nama tanpa akhiran, atau null. */
+export function askName(type, extra = {}) {
+  const info = { fileName: S.file.name, today: M.today(), percent: M.summary(project(), S.page, S.until).percent, ...extra };
+  const all = values(type, info);
+  let chosen = [...(prefs.naming?.[type] ?? DEFAULTS[type])];
+  let typed = false;
+  return new Promise((resolve) => {
+    const s = sheet({
+      title: 'Nama berkas', sub: `Berkas ${EXT[type]}`, onClose: (v) => resolve(v ?? null),
+      body: `<form><p class="label">Susun dari</p><div class="chips">${PARTS.filter(([k]) => all[k]).map(([k, label]) => `<button type="button" class="soft" data-part="${k}" aria-pressed="false">${label}</button>`).join('')}</div>
+        <label class="field">Nama (boleh diketik sendiri)<input name="name" autocomplete="off"></label>
+        <p class="hint" data-preview></p>
+        <button type="button" class="link" data-reset>Kembali ke bawaan</button>
+        <div class="pair"><button type="button" class="soft" data-no>Batal</button><button class="solid">Simpan berkas</button></div></form>`,
+    });
+    const input = $('input[name=name]', s.el);
+    const paint = () => {
+      for (const b of $$('[data-part]', s.el)) {
+        const on = chosen.includes(b.dataset.part);
+        b.classList.toggle('solid', on);
+        b.classList.toggle('soft', !on);
+        b.setAttribute('aria-pressed', on);
+      }
+      if (!typed) input.value = buildName(chosen, all);
+      $('[data-preview]', s.el).textContent = `${safeName(input.value)}${EXT[type]}`;
+    };
+    paint();
+    input.oninput = () => { typed = true; paint(); };
+    s.el.addEventListener('click', (e) => {
+      const b = e.target.closest('button');
+      if (!b) return;
+      if (b.dataset.part) {
+        chosen = chosen.includes(b.dataset.part) ? chosen.filter((k) => k !== b.dataset.part) : [...chosen, b.dataset.part];
+        typed = false;
+        paint();
+      } else if ('reset' in b.dataset) { chosen = [...DEFAULTS[type]]; typed = false; paint(); }
+      else if ('no' in b.dataset) s.close();
+    });
+    $('form', s.el).onsubmit = (e) => {
+      e.preventDefault();
+      prefs.naming = { ...prefs.naming, [type]: chosen };
+      savePrefs();
+      s.close(safeName(input.value.replace(new RegExp(`\\${EXT[type]}$`, 'i'), '')));
+    };
+  });
+}
+
 /* ---------- rekap dan hasil ---------- */
 export async function savePkp() {
+  const name = await askName('pkp');
+  if (!name) return;
   await W.flush();
   const hash = [...new Uint8Array(await crypto.subtle.digest('SHA-256', S.pdf))].map((b) => b.toString(16).padStart(2, '0')).join('');
   const pdfName = project().pdf.name || `${S.file.name.replace(/\.pkp$/i, '')}.pdf`;
-  await deliver(encodePkp(finalize(project(), pdfName, S.view.pages, hash), S.pdf), `${safeName(S.file.name.replace(/\.pkp$/i, ''))}.pkp`, 'application/x-pdfkill-project');
+  await deliver(encodePkp(finalize(project(), pdfName, S.view.pages, hash), S.pdf), `${name}.pkp`, 'application/x-pdfkill-project');
   S.file.backupAt = Date.now();
   await W.flush();
 }
@@ -608,11 +689,16 @@ export function recap() {
     try {
       if (act === 'highlight') { S.period = { ...period }; s.close(); W.refresh(); }
       if (act === 'pkp') await savePkp();
-      if (act === 'xlsx') await deliver(toXlsx(p, names, S.until), `${base}.xlsx`, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      if (act === 'xlsx') {
+        const name = await askName('xlsx', { period });
+        if (name) await deliver(toXlsx(p, names, S.until), `${name}.xlsx`, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      }
       if (act === 'png') {
+        const name = await askName('png', { sheet: W.sheetName(S.page) });
+        if (!name) return;
         const sum = M.summary(p, S.page, S.until);
         const canvas = await sheetImage(S.view, p, S.page, `${base.replaceAll('_', ' · ')} · ${W.sheetName(S.page)} · ${sum.percent}% · ${M.fmtDate(S.until ?? M.today())}`, { ...paintOptions(), period: null });
-        await deliver(new Uint8Array(await (await toBlob(canvas)).arrayBuffer()), `${base} ${safeName(W.sheetName(S.page))}.png`, 'image/png');
+        await deliver(new Uint8Array(await (await toBlob(canvas)).arrayBuffer()), `${name}.png`, 'image/png');
       }
       if (act === 'pdf') {
         const pages = names.map((_, i) => i).filter((i) => M.elementsOn(p, i).some((x) => x.date));
@@ -620,6 +706,8 @@ export function recap() {
         s.close();
         const head = await form('Kop laporan', [{ key: 'title', label: 'Judul', value: S.file.title ?? `Laporan progres ${base.replaceAll('_', ' ')}` }, { key: 'author', label: 'Disusun oleh', value: prefs.author }], 'Buat PDF', `Periode ${M.fmtDate(period.from)} sampai ${M.fmtDate(period.to)}`);
         if (!head) return;
+        const name = await askName('pdf', { period });
+        if (!name) return;
         S.file.title = head.title.trim();
         prefs.author = head.author.trim();
         savePrefs();
@@ -627,7 +715,7 @@ export function recap() {
         toast('Menyusun PDF…');
         const front = recapPages({ title: S.file.title || 'Laporan progres', author: prefs.author, period, names, report: periodReport(p, S.view.pages, period.from, period.to), volumes: volumes(p, S.view.pages, S.until) });
         const pdf = await reportPdf(S.view, pages, (page, g) => paintSheet(g, p, page, S.view.sizes[page], { ...paintOptions(), period: null, notes: false }), front);
-        await deliver(pdf, `${base}-progres.pdf`, 'application/pdf');
+        await deliver(pdf, `${name}.pdf`, 'application/pdf');
       }
     } catch (err) { console.error(err); toast(`Gagal: ${err.message}`); }
   });
