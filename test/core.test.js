@@ -219,3 +219,12 @@ test('pilih banyak lembar: rentang dan geser sekelompok', () => {
   assert.deepEqual(right.order, [0, 1, 3, 2, 4]);
   assert.deepEqual([...right.chosen].sort(), [3, 4]);
 });
+
+test('pasang aplikasi: kenali perangkat tablet', async () => {
+  globalThis.addEventListener ??= () => {};
+  const { detect, steps } = await import('../js/install.js');
+  assert.deepEqual(detect('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 Version/18.0 Safari/605.1.15', 5), { system: 'ios', browser: 'Safari' });
+  assert.deepEqual(detect('Mozilla/5.0 (Linux; Android 14; SM-X710) AppleWebKit/537.36 SamsungBrowser/27.0 Chrome/125.0 Safari/537.36'), { system: 'android', browser: 'Samsung Internet' });
+  assert.deepEqual(detect('Mozilla/5.0 (Linux; Android 14; wv) AppleWebKit/537.36 Chrome/130.0 Safari/537.36'), { system: 'android', browser: 'dalam-aplikasi' });
+  assert.match(steps({ system: 'ios', browser: 'Safari' })[0], /Bagikan/);
+});

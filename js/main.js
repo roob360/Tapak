@@ -3,6 +3,7 @@ import * as db from './store.js';
 import { decodePkp, emptyProject } from './pkp.js';
 import { openPdf, imageToPdf, arrangePages, toBlob } from './pdf.js';
 import { pickFiles } from './pick.js';
+import { install, installed, onInstallChange } from './install.js';
 import { toolbar, selectable } from './select.js';
 import { straighten } from './crop.js';
 import * as W from './work.js';
@@ -25,7 +26,7 @@ async function showHome() {
   const groups = new Map();
   for (const f of files) groups.set(f.building || 'Lainnya', [...(groups.get(f.building || 'Lainnya') ?? []), f]);
   app.innerHTML = `<main id="home">
-    <header><div><h1>Tapak</h1><p>Satu berkas: satu pekerjaan, satu gedung</p></div><div class="line"><button class="soft" data-a="open">Buka proyek .pkp</button><button class="solid" data-a="new">Berkas baru</button></div></header>
+    <header><div><h1>Tapak</h1><p>Satu berkas: satu pekerjaan, satu gedung</p></div><div class="line">${installed() ? '' : '<button class="soft" data-a="install">Pasang aplikasi</button>'}<button class="soft" data-a="open">Buka proyek .pkp</button><button class="solid" data-a="new">Berkas baru</button></div></header>
     ${[...groups].map(([building, list]) => `<h2>${esc(building)}</h2><div class="cards">${list.map((f) => `<div class="card"><button data-open="${f.id}"><span class="thumb">${f.thumb ? `<img src="${f.thumb}" alt="">` : icon('berkas')}</span><b>${esc(f.name.replace(/\.pkp$/i, ''))}</b><small>${f.summary?.sheets ?? 0} lembar · ${f.summary?.elements ?? 0} elemen</small><span class="meter"><i style="width:${f.summary?.percent ?? 0}%"></i></span><em>${f.summary?.percent ?? 0}%</em><small class="backup">${backupText(f)}</small></button><button class="round soft menu" data-menu="${f.id}" aria-label="Pilihan berkas">${icon('more')}</button></div>`).join('')}</div>`).join('')
       || '<div class="empty"><p>Belum ada berkas.</p><p>Buat dari PDF denah atau foto gambar, atau buka proyek <b>.pkp</b> dari PDFKill.</p></div>'}
     <p class="note">Data tersimpan di perangkat ini. Simpan .pkp secara berkala sebagai cadangan.</p>
@@ -41,6 +42,7 @@ async function onHome(e) {
   const d = b.dataset;
   try {
     if (d.open) return await open(d.open, b);
+    if (d.a === 'install') return await install();
     if (d.a === 'new') return await newFile(await pickFiles('application/pdf,.pdf,image/*', true));
     if (d.a === 'open') return await openProject((await pickFiles('.pkp'))[0]);
     if (d.menu) {
@@ -152,6 +154,7 @@ const newDialog = (pages) => new Promise((resolve) => {
 });
 
 W.applyTheme();
+onInstallChange(() => { if ($('#home') && installed()) showHome(); });
 addEventListener('keydown', W.key);
 addEventListener('keyup', W.keyUp);
 addEventListener('resize', () => requestAnimationFrame(W.relayout));
