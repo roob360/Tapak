@@ -24,6 +24,7 @@ folder ini harus disajikan lewat HTTPS (misalnya GitHub Pages).
 | `js/auto.js`, `js/worker.js` | ruang otomatis, cari simbol, tempel ke garis |
 | `js/pdf.js`, `js/export.js` | PDF dan Excel |
 | `js/naming.js` | nama berkas ekspor |
+| `js/select.js` | pilih banyak lembar |
 | `js/report.js`, `js/page.js` | progres periode, volume, halaman laporan |
 | `js/crop.js`, `js/warp.js`, `js/deskew.js` | koreksi foto miring dan pelurusan lembar scan |
 | `js/cursor.js` | kursor per alat |

@@ -9,6 +9,7 @@ import { findRoom, findSimilar, binarize, crop } from '../js/auto.js';
 import { toXlsx, col } from '../js/export.js';
 import { week, shift, periodReport, volumes } from '../js/report.js';
 import { DEFAULTS, values, buildName } from '../js/naming.js';
+import { parseRange, setRange, moveChosen } from '../js/select.js';
 
 function sample() {
   const p = P.emptyProject('a.pdf', 3);
@@ -202,4 +203,19 @@ test('nama berkas ekspor dari bagian terpilih', () => {
   assert.equal(buildName([], v), 'Dinding');
   const loose = values('pkp', { fileName: 'denah/1.pkp', today: '2026-11-26' });
   assert.equal(buildName(DEFAULTS.pkp, loose), 'denah-1');
+});
+
+test('pilih banyak lembar: rentang dan geser sekelompok', () => {
+  assert.deepEqual([...parseRange('1-3, 6, 9-8', 10)], [0, 1, 2, 5, 7, 8]);
+  assert.deepEqual([...parseRange('2 sd 4', 3)], [1, 2]);
+  assert.equal(parseRange('abc', 5), null);
+  const set = new Set([0]);
+  setRange(set, 3, 1, true);
+  assert.deepEqual([...set].sort(), [0, 1, 2, 3]);
+  const left = moveChosen(5, new Set([2, 3]), -1);
+  assert.deepEqual(left.order, [0, 2, 3, 1, 4]);
+  assert.deepEqual([...left.chosen], [1, 2]);
+  const right = moveChosen(5, new Set([2, 4]), 1);
+  assert.deepEqual(right.order, [0, 1, 3, 2, 4]);
+  assert.deepEqual([...right.chosen].sort(), [3, 4]);
 });

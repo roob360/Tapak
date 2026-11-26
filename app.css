@@ -114,6 +114,11 @@ svg.i { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-widt
 .sheet h2 { font-size: 19px; }
 .sheet header p { color: var(--sub); font-size: 13px; }
 .sheet .body { overflow-y: auto; padding: 6px 20px calc(18px + env(safe-area-inset-bottom)); overscroll-behavior: contain; }
+/* jarak bawaan antar blok di semua panel dan dialog; spesifisitas nol agar aturan lain tetap menang */
+:where(.sheet .body, .sheet .body > form) > :where(*) + :where(*) { margin-top: 10px; }
+:where(.sheet .body) > :where(.row) + :where(.row) { margin-top: 0; }
+.sheet .body p.hint, .sheet .body p.sub { margin-top: 8px; }
+.sheet .body > p:first-child { margin-top: 0; }
 .sheet h3 { display: flex; justify-content: space-between; align-items: center; font-size: 15px; }
 .sheet hr { border: 0; border-top: 1px solid var(--line); margin: 12px 0; }
 .grip { display: none; }
@@ -152,6 +157,11 @@ input:not([type]), input[type=text], input[type=number], input[type=date], texta
 .list button { justify-content: flex-start; border-radius: 12px; border-bottom: 1px solid var(--line); gap: 14px; text-align: left; }
 .stage-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
 .stage-row input[type=color], .swatches input { width: 44px; height: 44px; flex: none; padding: 0; border: 0; background: none; }
+.picker { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.picker input { width: auto; flex: 1; min-width: 150px; }
+.sheets { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+.sheets img { pointer-events: none; }
+.line > .sub { flex: 1; }
 .sheets { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 10px; }
 .sheets button { flex-direction: column; gap: 4px; padding: 10px; border-radius: 16px; border: 2px solid var(--line); }
 .sheets button.on { border-color: var(--accent); background: var(--soft); }

@@ -3,6 +3,7 @@ import * as db from './store.js';
 import { decodePkp, emptyProject } from './pkp.js';
 import { openPdf, imageToPdf, arrangePages, toBlob } from './pdf.js';
 import { pickFiles } from './pick.js';
+import { toolbar, selectable } from './select.js';
 import { straighten } from './crop.js';
 import * as W from './work.js';
 import { $, $$, esc, icon, sheet, ask, choose, form, toast, move, stagger } from './ui.js';
@@ -126,25 +127,27 @@ const newDialog = (pages) => new Promise((resolve) => {
   const s = sheet({
     title: 'Berkas baru', sub: 'Nama: disiplin_pekerjaan_gedung', wide: true,
     body: `<div class="grid3"><label class="field">Disiplin<input name="discipline" placeholder="STR"></label><label class="field">Pekerjaan<input name="work" placeholder="Kolom"></label><label class="field">Gedung<input name="building" placeholder="Gedung A"></label></div>
-      <p class="label">${pages.length} halaman. Ketuk untuk menyertakan atau membuang.</p>
-      <div class="sheets">${pages.map((p, k) => `<button data-k="${k}" class="on"><img src="${p.thumb}" alt=""><b>Halaman ${k + 1}</b></button>`).join('')}</div>
-      <div class="pair"><button class="soft" data-no>Batal</button><button class="solid" data-make>Buat ${pages.length} lembar</button></div>`,
+      <p class="label" data-count></p>${toolbar()}
+      <div class="sheets">${pages.map((p, k) => `<button type="button" data-i="${k}"><img src="${p.thumb}" alt="" draggable="false"><b>Halaman ${k + 1}</b></button>`).join('')}</div>
+      <div class="pair"><button class="soft" data-no>Batal</button><button class="solid" data-make></button></div>`,
     onClose: (v) => resolve(v ?? null),
   });
+  const chosen = new Set(pages.map((_, k) => k));
+  selectable(s.body, {
+    chosen, count: () => pages.length,
+    onChange: () => {
+      pages.forEach((p, k) => { p.on = chosen.has(k); });
+      $('[data-count]', s.el).textContent = `${chosen.size} dari ${pages.length} halaman dipakai`;
+      const make = $('[data-make]', s.el);
+      make.textContent = `Buat ${chosen.size} lembar`;
+      make.disabled = !chosen.size;
+    },
+  })();
   s.el.addEventListener('click', (e) => {
     const b = e.target.closest('button');
     if (!b) return;
-    if (b.dataset.k !== undefined) {
-      const p = pages[+b.dataset.k];
-      p.on = !p.on;
-      b.classList.toggle('on', p.on);
-      const n = pages.filter((x) => x.on).length;
-      const make = $('[data-make]', s.el);
-      make.textContent = `Buat ${n} lembar`;
-      make.disabled = !n;
-    }
     if ('no' in b.dataset) s.close();
-    if ('make' in b.dataset) s.close(Object.fromEntries($$('input', s.el).map((i) => [i.name, i.value])));
+    if ('make' in b.dataset) s.close(Object.fromEntries($$('input[name]', s.el).map((i) => [i.name, i.value])));
   });
 });
 

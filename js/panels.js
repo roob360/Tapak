@@ -11,6 +11,7 @@ import { PARTS, DEFAULTS, values, buildName } from './naming.js';
 import { recapPages, paintSheet, sheetImage } from './page.js';
 import { pickFiles } from './pick.js';
 import { straighten } from './crop.js';
+import { toolbar, selectable, moveChosen } from './select.js';
 import { straightenDialog } from './deskew.js';
 import { $, $$, esc, icon, sheet, form, ask, choose, toast, move, stagger } from './ui.js';
 
@@ -305,16 +306,43 @@ export function stagesDialog(first) {
 
 /* ---------- kelola lembar ---------- */
 export function sheetsDialog() {
-  let current = S.page;
+  const chosen = new Set([S.page]);
+  let many = false, working = false;
   const s = sheet({ title: 'Kelola lembar', wide: true });
-  const render = () => {
-    s.update(`<p class="sub">${S.view.pages} lembar</p><div class="sheets">${Array.from({ length: S.view.pages }, (_, i) => { const sum = M.summary(project(), i); return `<button data-page="${i}" class="${i === current ? 'on' : ''}"><img alt=""><b>${esc(W.sheetName(i))}</b><small>${sum.n ? `${sum.n} elemen` : 'belum dipetakan'} · ${sum.percent}%</small></button>`; }).join('')}<button class="add" data-act="add">${icon('plus')}<b>Tambah lembar</b><small>PDF, foto, atau kosong</small></button></div>
-      <p class="label">${esc(W.sheetName(current))} terpilih</p>
-      <div class="chips"><button class="soft" data-act="open">Buka</button><button class="soft" data-act="left">Geser kiri</button><button class="soft" data-act="right">Geser kanan</button><button class="soft" data-act="rename">Ganti nama</button><button class="soft" data-act="copy">Duplikat</button><button class="soft" data-act="rotate">Putar</button><button class="soft" data-act="deskew">Luruskan</button><button class="soft warn" data-act="delete">Hapus</button></div>`);
-    $$('[data-page] img', s.el).forEach(async (img, i) => { img.src = await W.thumb(i); });
+  s.update(`<div class="line"><p class="sub" data-count></p><button class="soft" data-act="many" aria-pressed="false">Pilih banyak</button></div><div data-tools hidden>${toolbar()}</div><div class="sheets" data-grid></div><p class="label" data-label></p><div class="chips" data-actions></div>`);
+  const picked = () => [...chosen].sort((a, b) => a - b);
+
+  const grid = () => {
+    $('[data-grid]', s.el).innerHTML = `${Array.from({ length: S.view.pages }, (_, i) => { const sum = M.summary(project(), i); return `<button data-i="${i}"><img alt="" draggable="false"><b>${i + 1}. ${esc(W.sheetName(i))}</b><small>${sum.n ? `${sum.n} elemen` : 'belum dipetakan'} · ${sum.percent}%</small></button>`; }).join('')}<button class="add" data-act="add">${icon('plus')}<b>Tambah lembar</b><small>PDF, foto, atau kosong</small></button>`;
+    $$('[data-i] img', s.el).forEach(async (img, i) => { img.src = await W.thumb(i); });
   };
-  render();
-  let working = false;
+  const state = () => {
+    const n = chosen.size, one = n === 1;
+    $('[data-count]', s.el).textContent = `${S.view.pages} lembar · ${n} terpilih`;
+    $('[data-tools]', s.el).hidden = !many;
+    const toggle = $('[data-act="many"]', s.el);
+    toggle.className = many ? 'solid' : 'soft';
+    toggle.setAttribute('aria-pressed', many);
+    $('[data-label]', s.el).textContent = !n ? 'Belum ada lembar terpilih' : one ? `${W.sheetName(picked()[0])} terpilih` : `${n} lembar terpilih`;
+    const button = (act, label, extra = '') => `<button class="soft ${extra}" data-act="${act}" ${n ? '' : 'disabled'}>${label}</button>`;
+    $('[data-actions]', s.el).innerHTML = (one ? button('open', 'Buka') : '') + button('left', 'Geser kiri') + button('right', 'Geser kanan')
+      + (one ? button('rename', 'Ganti nama') : button('renumber', 'Nama berurutan')) + button('copy', 'Duplikat') + button('rotate', 'Putar')
+      + (one ? button('deskew', 'Luruskan') : '') + button('delete', one ? 'Hapus' : `Hapus ${n}`, 'warn');
+  };
+  grid();
+  const paint = selectable(s.body, {
+    chosen, count: () => S.view.pages, onChange: state,
+    // mode biasa: ketukan memilih satu saja; Ctrl atau "Pilih banyak" menambah
+    onTap: (i, e) => {
+      if (many || e.ctrlKey || e.metaKey) { many = true; return false; }
+      chosen.clear();
+      chosen.add(i);
+      return true;
+    },
+  });
+  paint();
+  const render = () => { grid(); paint(); };
+
   /** Susun ulang halaman; semua data per halaman ikut pindah. */
   const apply = async (order, { copy = 'all', rotate = new Set(), extra = null, names: custom } = {}) => {
     const plan = order.map((from, i) => (from != null ? { from } : extra[i]));
@@ -329,46 +357,59 @@ export function sheetsDialog() {
     toast('Lembar diperbarui', { label: 'Urungkan', run: W.undo });
   };
   const identity = () => [...Array(S.view.pages).keys()];
+
   s.el.addEventListener('click', async (e) => {
-    const b = e.target.closest('button');
-    if (!b || working) return;
-    if (b.dataset.page !== undefined) { current = +b.dataset.page; return render(); }
-    const act = b.dataset.act;
-    if (!act) return;
+    const act = e.target.closest('[data-act]')?.dataset.act;
+    if (!act || working) return;
+    if (act === 'many') {
+      many = !many;
+      if (!many && chosen.size > 1) { const keep = picked()[0]; chosen.clear(); chosen.add(keep); }
+      return paint();
+    }
     working = true;
     try {
-      const order = identity();
-      if (act === 'open') { s.close(); await W.showPage(current, Math.sign(current - S.page)); return; }
+      const list = picked(), first = list[0], order = identity();
+      const select = (indices) => { chosen.clear(); indices.forEach((i) => chosen.add(i)); };
+      if (act === 'open') { s.close(); await W.showPage(first, Math.sign(first - S.page)); return; }
       if (act === 'left' || act === 'right') {
-        const to = current + (act === 'left' ? -1 : 1);
-        if (to < 0 || to >= order.length) return;
-        [order[current], order[to]] = [order[to], order[current]];
-        await apply(order);
-        current = to;
+        const moved = moveChosen(order.length, chosen, act === 'left' ? -1 : 1);
+        if (moved.order.every((v, i) => v === i)) return;
+        await apply(moved.order);
+        select(moved.chosen);
       } else if (act === 'rename') {
-        const v = await form('Nama lembar', [{ key: 'name', label: 'Nama', value: W.sheetName(current) }]);
+        const v = await form('Nama lembar', [{ key: 'name', label: 'Nama', value: W.sheetName(first) }]);
         if (!v) return;
-        const names = identity().map((i) => (i === current ? v.name.trim() : S.names[i]));
-        await W.changePdf(await renamePages(S.pdf, names), structuredClone(project()));
+        await W.changePdf(await renamePages(S.pdf, order.map((i) => (i === first ? v.name.trim() : S.names[i]))), structuredClone(project()));
+      } else if (act === 'renumber') {
+        const v = await form(`Nama ${list.length} lembar`, [{ key: 'prefix', label: 'Awalan', value: 'Lantai ' }, { key: 'start', label: 'Mulai dari', value: '1', type: 'number' }], 'Beri nama');
+        if (!v) return;
+        const start = Number(v.start) || 1;
+        await W.changePdf(await renamePages(S.pdf, order.map((i) => (chosen.has(i) ? `${v.prefix}${start + list.indexOf(i)}` : S.names[i]))), structuredClone(project()));
       } else if (act === 'copy') {
-        const what = await choose('Yang disalin', [{ id: 'all', label: 'Gambar dan data progres', icon: 'salin' }, { id: 'stages', label: 'Gambar dan tahap saja', icon: 'salin' }, { id: 'none', label: 'Gambar saja', icon: 'foto' }]);
+        const what = await choose('Yang disalin', [{ id: 'all', label: 'Gambar dan data progres', icon: 'salin' }, { id: 'stages', label: 'Gambar dan tahap saja', icon: 'salin' }, { id: 'none', label: 'Gambar saja', icon: 'foto' }], `${list.length} lembar`);
         if (!what) return;
-        order.splice(current + 1, 0, current);
-        await apply(order, { copy: what, names: order.map((i, k) => (k === current + 1 ? `${W.sheetName(i)} salinan` : S.names[i])) });
-        current += 1;
-      } else if (act === 'deskew') { s.close(); await W.showPage(current, Math.sign(current - S.page)); await straightenDialog(); return; }
-      else if (act === 'rotate') await apply(order, { rotate: new Set([current]) });
+        // tiap salinan ditaruh tepat sesudah aslinya
+        const next = [], names = [], copies = [];
+        for (const i of order) {
+          next.push(i); names.push(S.names[i]);
+          if (chosen.has(i)) { copies.push(next.length); next.push(i); names.push(`${W.sheetName(i)} salinan`); }
+        }
+        await apply(next, { copy: what, names });
+        select(copies);
+      } else if (act === 'rotate') await apply(order, { rotate: new Set(list) });
+      else if (act === 'deskew') { s.close(); await W.showPage(first, Math.sign(first - S.page)); await straightenDialog(); return; }
       else if (act === 'delete') {
-        if (order.length === 1) return toast('Berkas harus punya minimal satu lembar');
-        if (!(await ask('Hapus lembar?', `${W.sheetName(current)} dan semua penandanya dihapus.`, 'Hapus', true))) return;
-        order.splice(current, 1);
-        await apply(order);
-        current = Math.min(current, order.length - 1);
+        if (list.length >= order.length) return toast('Berkas harus punya minimal satu lembar');
+        const marks = list.reduce((a, i) => a + M.allElements(project(), i).length, 0);
+        const label = list.length === 1 ? W.sheetName(first) : `${list.length} lembar (${list.map((i) => i + 1).join(', ')})`;
+        if (!(await ask('Hapus lembar?', `${label} dihapus${marks ? ` beserta ${marks} elemennya` : ''}.`, 'Hapus', true))) return;
+        await apply(order.filter((i) => !chosen.has(i)));
+        select([Math.min(first, S.view.pages - 1)]);
       } else if (act === 'add') {
         const how = await choose('Tambah lembar', [{ id: 'file', label: 'Dari PDF atau foto', icon: 'berkas' }, { id: 'blank', label: 'Halaman kosong', icon: 'kotak' }]);
         if (!how) return;
         const extra = [];
-        if (how === 'blank') { extra[order.length] = { blank: [...S.view.sizes[current]] }; order.push(null); }
+        if (how === 'blank') { extra[order.length] = { blank: [...S.view.sizes[first ?? 0]] }; order.push(null); }
         else {
           for (const file of await pickFiles('application/pdf,.pdf,image/*', true)) {
             let bytes;
@@ -380,12 +421,15 @@ export function sheetsDialog() {
           }
           if (!extra.length) return;
         }
+        const added = order.map((v, i) => (v == null ? i : -1)).filter((i) => i >= 0);
         await apply(order, { extra });
-        current = order.length - 1;
+        select(added);
+        many = added.length > 1;
       }
       render();
     } catch (err) { console.error(err); toast(`Gagal: ${err.message}`); } finally { working = false; }
   });
+  return s;
 }
 
 /* ---------- kuas ---------- */
