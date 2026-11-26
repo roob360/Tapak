@@ -1,8 +1,8 @@
 // Jalan offline: jaringan dulu (pembaruan langsung sampai), cadangan dari cache.
-const CACHE = 'tapak-v6';
+const CACHE = 'tapak-v7';
 const FILES = [
   './', 'index.html', 'app.css', 'manifest.webmanifest', 'icons/icon.svg', 'icons/icon-192.png',
-  ...['main', 'work', 'panels', 'board', 'draw', 'model', 'pkp', 'geom', 'auto', 'worker', 'pdf', 'store', 'export', 'ui', 'crop', 'warp', 'pick', 'deskew', 'cursor'].map((n) => `js/${n}.js`),
+  ...['main', 'work', 'panels', 'board', 'draw', 'model', 'pkp', 'geom', 'auto', 'worker', 'pdf', 'store', 'export', 'ui', 'crop', 'warp', 'pick', 'deskew', 'cursor', 'report', 'page'].map((n) => `js/${n}.js`),
   'vendor/pdfjs/pdf.min.mjs', 'vendor/pdfjs/pdf.worker.min.mjs', 'vendor/pdfjs/wasm/openjpeg.wasm', 'vendor/pdfjs/wasm/jbig2.wasm', 'vendor/pdflib/pdf-lib.esm.min.js',
 ];
 

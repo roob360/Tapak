@@ -138,9 +138,14 @@ function setOutline(doc, names, { PDFName, PDFHexString }) {
 }
 
 /** PDF laporan: tiap halaman terpilih dirender lalu diberi tanda oleh `paint(i, g, skala)`. */
-export async function reportPdf(view, pages, paint) {
+export async function reportPdf(view, pages, paint, front = []) {
   const { PDFDocument } = await loadLib();
   const doc = await PDFDocument.create();
+  for (const { canvas, size } of front) {
+    const pic = await doc.embedPng(new Uint8Array(await (await toBlob(canvas)).arrayBuffer()));
+    doc.addPage([...size]).drawImage(pic, { x: 0, y: 0, width: size[0], height: size[1] });
+    canvas.width = canvas.height = 0;
+  }
   for (const i of pages) {
     const canvas = await view.render(i, 2600);
     const [w, h] = view.sizes[i];

@@ -60,11 +60,13 @@ export function sheet({ title, sub = '', body = '', kind = 'dialog', wide = fals
       if (scrim) finished(move(scrim, [{ opacity: 1 }, { opacity: 0 }], 170, { fill: 'forwards' })).then(() => scrim.remove());
       finished(move(el, [{ transform: el.style.transform || 'none', opacity: 1 }, { transform: away, opacity: 0 }], 170, { fill: 'forwards' })).then(() => el.remove());
       onClose?.(value);
+      if (kind === 'panel') queueMicrotask(() => dispatchEvent(new Event('panelchange')));
       gone();
     },
     update(html) { api.body.innerHTML = html; },
   };
   stack.push(api);
+  if (kind === 'panel') dispatchEvent(new Event('panelchange'));
   $('[data-close]', el).onclick = () => api.close();
   if (scrim) scrim.onclick = () => api.close();
   drag(el, api);

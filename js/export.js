@@ -52,9 +52,10 @@ const safeSheet = (name, used) => {
 /** Ringkasan (rumus), satu lembar per halaman (elemen x tahap), dan jumlah per tanggal (rumus). */
 export function toXlsx(project, names, until = null) {
   const TYPE = { point: 'Titik', line: 'Garis', poly: 'Area' };
-  const used = new Set(['ringkasan', 'per tanggal']);
+  const used = new Set(['ringkasan', 'volume', 'per tanggal']);
   const pages = names.map((name, page) => ({ page, name, stages: stagesOf(project, page), els: allElements(project, page) })).filter((p) => p.els.length);
   const parts = [], titles = [];
+  const volume = [['Lembar', 'Tahap', 'Elemen selesai', 'Panjang (m)', 'Luas (m2)'].map((h) => ({ h }))];
   const summary = [['No', 'Lembar', 'Pekerjaan', 'Elemen', 'Pekerjaan selesai', 'Progres'].map((h) => ({ h }))];
   const dateRefs = [];
   pages.forEach((p, i) => {
@@ -76,6 +77,10 @@ export function toXlsx(project, names, until = null) {
     });
     parts.push(sheetXml(rows, [6, 16, 9, 13, 12, ...p.stages.map(() => 16), 18, 10]));
     titles.push(title);
+    p.stages.forEach((s, k) => {
+      const done = `${q}!${col(first + k)}2:${col(first + k)}${n}`;
+      volume.push([p.name, s.name, { f: `COUNT(${done})` }, { f: `SUMIF(${done},">0",${q}!D2:D${n})`, s: 4 }, { f: `SUMIF(${done},">0",${q}!E2:E${n})`, s: 4 }]);
+    });
     const range = p.stages.length ? `${q}!${col(first)}2:${col(last)}${n}` : null;
     if (range) dateRefs.push(range);
     summary.push([i + 1, p.name, project.progress.sheets[p.page]?.work ?? '', { f: `COUNTA(${q}!C2:C${n})` }, { f: range ? `COUNT(${range})` : '0' },
@@ -84,8 +89,8 @@ export function toXlsx(project, names, until = null) {
   const dates = [...new Set(pages.flatMap((p) => p.els.flatMap((el) => doneStages(p.stages, el, until).map((s) => el.st[s.id]))))].sort();
   const daily = [['Tanggal', 'Jumlah pekerjaan'].map((h) => ({ h }))];
   dates.forEach((d, i) => daily.push([{ d }, { f: dateRefs.map((r) => `COUNTIF(${r},A${i + 2})`).join('+') || '0' }]));
-  const all = [sheetXml(summary, [6, 22, 22, 10, 18, 10]), ...parts, sheetXml(daily, [14, 18])];
-  const sheetNames = ['Ringkasan', ...titles, 'Per tanggal'];
+  const all = [sheetXml(summary, [6, 22, 22, 10, 18, 10]), ...parts, sheetXml(volume, [22, 24, 16, 14, 14]), sheetXml(daily, [14, 18])];
+  const sheetNames = ['Ringkasan', ...titles, 'Volume', 'Per tanggal'];
   const R = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
   const CT = 'application/vnd.openxmlformats-officedocument.spreadsheetml';
   return zip([

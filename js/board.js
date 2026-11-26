@@ -280,6 +280,8 @@ export function createBoard(canvas, h) {
     zoomBy(f) { const a = area(); glide(clamp(around([a.x + a.w / 2, a.y + a.h / 2], Math.max(fitK, Math.min(fitK * ZOOM_MAX, view.k * f))))); },
     zoom: () => view.k / fitK,
     reveal() { if (image) glide(clamp(view)); },
+    /** Ruang kerja berubah: yang sedang pas layar tetap pas layar. */
+    refit() { if (image) glide(view.k <= fitK * 1.01 ? fitView() : clamp(view)); },
     setPage(bmp, pageSize, keep = false) {
       anim++; // animasi kamera yang masih jalan tidak boleh menimpa halaman baru
       image = bmp;

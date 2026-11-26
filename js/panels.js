@@ -5,7 +5,9 @@ import { S, prefs, savePrefs, change, project } from './work.js'; // impor hidup
 import { remapPages, rotatePage, encodePkp, finalize } from './pkp.js';
 import { arrangePages, renamePages, reportPdf, imageToPdf, openPdf, toBlob } from './pdf.js';
 import { toXlsx, deliver, safeName } from './export.js';
-import { drawMarks, drawAnnotation, drawLegend } from './draw.js';
+import { drawAnnotation } from './draw.js';
+import { week, shift, periodReport, volumes } from './report.js';
+import { recapPages, paintSheet, sheetImage } from './page.js';
 import { pickFiles } from './pick.js';
 import { straighten } from './crop.js';
 import { straightenDialog } from './deskew.js';
@@ -422,7 +424,7 @@ export function viewPanel(focus) {
     body: `<p class="label">Warna penanda</p><div class="grid2">${mode('tahap', 'Menurut tahap')}${mode('tanggal', 'Menurut tanggal')}</div>
       <label class="range">Kepekatan<input type="range" data-k="alpha" min="0" max="100" step="5" value="${alpha}"><output>${alpha}%</output></label>
       <div class="chips">${[[20, 'Tipis'], [35, 'Nyaman'], [65, 'Tebal'], [100, 'Penuh']].map(([v, n]) => `<button class="soft" data-alpha="${v}">${n}</button>`).join('')}</div>
-      <p class="label">Tulisan di penanda</p>${sw('pct', 'Persen progres', prefs.pct)}${sw('dates', 'Tanggal', prefs.dates)}${sw('names', 'Nama elemen', prefs.names)}
+      <p class="label">Tulisan di penanda</p>${sw('pct', 'Persen progres', prefs.pct)}${sw('dates', 'Tanggal', prefs.dates)}${sw('names', 'Nama elemen', prefs.names)}${sw('labelTop', 'Label area di tepi atas', prefs.labelTop)}
       <p class="label">Legenda</p>${sw('legend', 'Tampilkan legenda', legend.on !== false)}
       <label class="range">Ukuran<input type="range" data-k="scale" min="50" max="400" step="10" value="${scale}"><output>${scale}%</output></label>
       <div class="grid2">${[['atas-kiri', 'Kiri atas'], ['atas-kanan', 'Kanan atas'], ['bawah-kiri', 'Kiri bawah'], ['bawah-kanan', 'Kanan bawah']].map(([v, n]) => `<button class="soft" data-corner="${v}">${n}</button>`).join('')}</div>
@@ -509,36 +511,86 @@ export async function savePkp() {
   const hash = [...new Uint8Array(await crypto.subtle.digest('SHA-256', S.pdf))].map((b) => b.toString(16).padStart(2, '0')).join('');
   const pdfName = project().pdf.name || `${S.file.name.replace(/\.pkp$/i, '')}.pdf`;
   await deliver(encodePkp(finalize(project(), pdfName, S.view.pages, hash), S.pdf), `${safeName(S.file.name.replace(/\.pkp$/i, ''))}.pkp`, 'application/x-pdfkill-project');
+  S.file.backupAt = Date.now();
+  await W.flush();
 }
+const paintOptions = () => ({ until: S.until, mode: prefs.colorMode, dates: prefs.dates, pct: prefs.pct, names: prefs.names, alpha: prefs.alpha, labelTop: prefs.labelTop, period: S.period, notes: project().annotations.show !== false });
+const num = (v) => (v ? v.toLocaleString('id-ID', { maximumFractionDigits: 2 }) : '—');
+
 export function recap() {
   const p = project();
   const names = Array.from({ length: S.view.pages }, (_, i) => W.sheetName(i));
+  const base = safeName(S.file.name.replace(/\.pkp$/i, ''));
   const sums = names.map((_, i) => M.summary(p, i));
-  const done = sums.reduce((a, s) => a + s.counts.reduce((x, y) => x + y, 0), 0), total = sums.reduce((a, s) => a + s.n * s.stages.length, 0);
+  const done = sums.reduce((a, x) => a + x.counts.reduce((q, v) => q + v, 0), 0), total = sums.reduce((a, x) => a + x.n * x.stages.length, 0);
+  const vol = volumes(p, S.view.pages, S.until);
+  let period = S.period ?? week(M.today());
+  let preset = S.period ? 'lain' : 'ini';
   const s = sheet({
     title: 'Rekap progres', wide: true, sub: `${sums.reduce((a, x) => a + x.n, 0)} elemen · ${total ? Math.round((done / total) * 100) : 0}% selesai`,
-    body: `<div class="table"><table><thead><tr><th>Lembar</th><th>Elemen</th><th>Tahap selesai</th><th>Progres</th></tr></thead><tbody>${sums.map((x, i) => `<tr><td>${esc(names[i])}</td><td>${x.n}</td><td>${x.stages.map((st, k) => `<span class="tag"><i class="dot full" style="--c:${st.color}"></i>${esc(st.name)} ${x.counts[k]}</span>`).join('') || '—'}</td><td><b>${x.percent}%</b><div class="meter"><i style="width:${x.percent}%"></i></div></td></tr>`).join('')}</tbody></table></div>
+    body: `<p class="label">Progres periode</p>
+      <div class="chips"><button data-preset="ini">Minggu ini</button><button data-preset="lalu">Minggu lalu</button><button data-preset="30">30 hari</button></div>
+      <div class="grid2"><label class="field">Dari<input type="date" data-from></label><label class="field">Sampai<input type="date" data-to></label></div>
+      <div data-period></div>
+      <p class="label">Per lembar (keseluruhan)</p>
+      <div class="table"><table><thead><tr><th>Lembar</th><th>Elemen</th><th>Tahap selesai</th><th>Progres</th></tr></thead><tbody>${sums.map((x, i) => `<tr><td>${esc(names[i])}</td><td>${x.n}</td><td>${x.stages.map((st, k) => `<span class="tag"><i class="dot full" style="--c:${st.color}"></i>${esc(st.name)} ${x.counts[k]}</span>`).join('') || '—'}</td><td><b>${x.percent}%</b><div class="meter"><i style="width:${x.percent}%"></i></div></td></tr>`).join('')}</tbody></table></div>
+      <p class="label">Volume selesai per tahap</p>
+      <div class="table"><table><thead><tr><th>Tahap</th><th>Elemen</th><th>Panjang (m)</th><th>Luas (m²)</th></tr></thead><tbody>${vol.rows.map((r) => `<tr><td><i class="dot full" style="--c:${r.color}"></i> ${esc(r.name)}</td><td>${r.count}</td><td>${num(r.length)}</td><td>${num(r.area)}</td></tr>`).join('') || '<tr><td colspan="4">Belum ada tahap.</td></tr>'}</tbody></table></div>
+      ${vol.unscaled ? '<p class="hint">Ada garis atau area di lembar yang belum diskala. Atur lewat Otomatis → Skala agar masuk hitungan.</p>' : ''}
       <p class="label">Per tanggal</p><div class="chips">${M.byDate(p).map(([d, n]) => `<span class="tag">${M.fmtDate(d)}: ${n}</span>`).join('') || '<span class="hint">Belum ada tanggal.</span>'}</div>
-      <div class="cards3"><button data-act="xlsx">${icon('rekap')}<b>Excel</b><small>rumus hidup</small></button><button data-act="pdf">${icon('berkas')}<b>PDF</b><small>hanya yang bertanggal</small></button><button data-act="pkp">${icon('share')}<b>Simpan .pkp</b><small>lanjut di desktop</small></button></div>`,
+      <div class="cards3"><button data-act="pdf">${icon('berkas')}<b>Laporan PDF</b><small>rekap dan gambar</small></button><button data-act="png">${icon('share')}<b>Bagikan gambar</b><small>lembar ini</small></button><button data-act="xlsx">${icon('rekap')}<b>Excel</b><small>rumus hidup</small></button><button data-act="pkp">${icon('salin')}<b>Simpan .pkp</b><small>cadangan, lanjut di desktop</small></button></div>`,
+  });
+  const showPeriod = () => {
+    const r = periodReport(p, S.view.pages, period.from, period.to);
+    $('[data-from]', s.el).value = period.from;
+    $('[data-to]', s.el).value = period.to;
+    for (const b of $$('[data-preset]', s.el)) b.className = b.dataset.preset === preset ? 'solid' : 'soft';
+    $('[data-period]', s.el).innerHTML = `<p class="big"><b>${r.after}%</b> <span>dari ${r.before}% · bertambah ${r.after - r.before} poin · ${r.total} tahap selesai</span></p>
+      <div class="table"><table><thead><tr><th>Lembar</th><th>Sebelum</th><th>Sesudah</th><th>Selesai di periode ini</th></tr></thead><tbody>${r.rows.map((x) => `<tr><td>${esc(names[x.page])}</td><td>${x.before}%</td><td><b>${x.after}%</b></td><td>${x.stages.map((st, k) => (x.added[k] ? `<span class="tag"><i class="dot full" style="--c:${st.color}"></i>${esc(st.name)} ${x.added[k]}</span>` : '')).join('') || '—'}</td></tr>`).join('') || '<tr><td colspan="4">Belum ada elemen.</td></tr>'}</tbody></table></div>
+      <button class="soft wide" data-act="highlight" ${r.total ? '' : 'disabled'}>Sorot di gambar yang dikerjakan periode ini</button>`;
+  };
+  showPeriod();
+  s.el.addEventListener('change', (e) => {
+    if (e.target.matches('[data-from], [data-to]')) {
+      const from = $('[data-from]', s.el).value, to = $('[data-to]', s.el).value;
+      if (!from || !to) return;
+      period = from <= to ? { from, to } : { from: to, to: from };
+      preset = 'lain';
+      showPeriod();
+    }
   });
   s.el.addEventListener('click', async (e) => {
-    const act = e.target.closest('[data-act]')?.dataset.act;
+    const b = e.target.closest('button');
+    if (!b) return;
+    if (b.dataset.preset) {
+      preset = b.dataset.preset;
+      period = preset === 'ini' ? week(M.today()) : preset === 'lalu' ? week(M.today(), 1) : { from: shift(M.today(), -29), to: M.today() };
+      return showPeriod();
+    }
+    const act = b.dataset.act;
     if (!act) return;
-    const base = safeName(S.file.name.replace(/\.pkp$/i, ''));
     try {
+      if (act === 'highlight') { S.period = { ...period }; s.close(); W.refresh(); }
       if (act === 'pkp') await savePkp();
       if (act === 'xlsx') await deliver(toXlsx(p, names, S.until), `${base}.xlsx`, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      if (act === 'png') {
+        const sum = M.summary(p, S.page, S.until);
+        const canvas = await sheetImage(S.view, p, S.page, `${base.replaceAll('_', ' · ')} · ${W.sheetName(S.page)} · ${sum.percent}% · ${M.fmtDate(S.until ?? M.today())}`, { ...paintOptions(), period: null });
+        await deliver(new Uint8Array(await (await toBlob(canvas)).arrayBuffer()), `${base} ${safeName(W.sheetName(S.page))}.png`, 'image/png');
+      }
       if (act === 'pdf') {
         const pages = names.map((_, i) => i).filter((i) => M.elementsOn(p, i).some((x) => x.date));
         if (!pages.length) return toast('Belum ada elemen bertanggal');
+        s.close();
+        const head = await form('Kop laporan', [{ key: 'title', label: 'Judul', value: S.file.title ?? `Laporan progres ${base.replaceAll('_', ' ')}` }, { key: 'author', label: 'Disusun oleh', value: prefs.author }], 'Buat PDF', `Periode ${M.fmtDate(period.from)} sampai ${M.fmtDate(period.to)}`);
+        if (!head) return;
+        S.file.title = head.title.trim();
+        prefs.author = head.author.trim();
+        savePrefs();
+        await W.flush();
         toast('Menyusun PDF…');
-        const pdf = await reportPdf(S.view, pages, (page, g, k) => {
-          const els = M.elementsOn(p, page).filter((x) => x.date && (!S.until || x.date <= S.until));
-          const unit = Math.max(...S.view.sizes[page]) / 1100;
-          drawMarks(g, p, els, M.stagesOf(p, page), { px: unit, until: S.until, mode: prefs.colorMode, dates: prefs.dates, pct: prefs.pct, names: prefs.names, alpha: prefs.alpha });
-          drawLegend(g, p, page, M.summary(p, page, S.until), { unit, mode: prefs.colorMode, until: S.until, elements: els, page: S.view.sizes[page] });
-          void k;
-        });
+        const front = recapPages({ title: S.file.title || 'Laporan progres', author: prefs.author, period, names, report: periodReport(p, S.view.pages, period.from, period.to), volumes: volumes(p, S.view.pages, S.until) });
+        const pdf = await reportPdf(S.view, pages, (page, g) => paintSheet(g, p, page, S.view.sizes[page], { ...paintOptions(), period: null, notes: false }), front);
         await deliver(pdf, `${base}-progres.pdf`, 'application/pdf');
       }
     } catch (err) { console.error(err); toast(`Gagal: ${err.message}`); }

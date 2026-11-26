@@ -9,7 +9,7 @@ import { nextId } from './pkp.js';
 import * as P from './panels.js';
 import { cursorFor } from './cursor.js';
 import { straightenDialog } from './deskew.js';
-import { $, $$, icon, esc, toast, form, choose, move, finished, wheel, closeWheel, closeTop, closeAll, isOpen } from './ui.js';
+import { $, $$, icon, esc, toast, form, choose, move, finished, wheel, closeWheel, closeTop, closeAll, isOpen, panelOpen } from './ui.js';
 
 const MODES = [['gambar', 'Gambar'], ['petakan', 'Petakan'], ['otomatis', 'Otomatis'], ['progres', 'Progres']];
 const TOOLS = {
@@ -28,7 +28,7 @@ const HINT = {
 
 const PREFS_KEY = 'tapak.prefs';
 export const prefs = {
-  alpha: 0.35, names: true, leftHand: false, finger: false, straighten: true, wheel: true, snap: true, theme: 'sistem', strip: true, sequential: false,
+  alpha: 0.35, names: true, labelTop: true, author: '', leftHand: false, finger: false, straighten: true, wheel: true, snap: true, theme: 'sistem', strip: true, sequential: false,
   colorMode: 'tahap', dates: true, pct: true, similarity: 80,
   favorites: [
     { name: 'Revisi', brush: 'pulpen', color: '#ff383c', size: 2.5, op: 1, pressure: 0.7, smooth: 0.35 },
@@ -43,7 +43,7 @@ export function applyTheme() { document.documentElement.dataset.theme = prefs.th
 /** Keadaan lembar kerja yang sedang terbuka. */
 export const S = {
   file: null, pdf: null, view: null, names: [], page: 0, mode: 'progres', tool: 'pilih', fav: 0, stage: null, selected: new Set(),
-  filter: null, until: null, legendDrag: null, editDrag: null, vertex: null, panel: null, draft: [], cursor: null, drag: null, stroke: null, found: null, pop: new Map(), legendBox: null,
+  filter: null, until: null, period: null, legendDrag: null, editDrag: null, vertex: null, panel: null, draft: [], cursor: null, drag: null, stroke: null, found: null, pop: new Map(), legendBox: null,
 };
 const history = M.createHistory();
 let hintTimer = 0;
@@ -62,6 +62,7 @@ export const getBoard = () => board;
 /* ---------- data, urungkan, simpan ---------- */
 const snap = () => ({ json: JSON.stringify(S.file.project), pdf: S.pdf });
 function save() {
+  if (S.file) S.file.changedAt = Date.now();
   clearTimeout(saveTimer);
   saveTimer = setTimeout(flush, 400);
 }
@@ -95,6 +96,7 @@ export function change(fn) {
 /** Perubahan yang juga mengganti PDF (kelola lembar). */
 export async function changePdf(pdf, nextProject) {
   history.push(snap());
+  S.file.changedAt = Date.now();
   S.file.project = nextProject;
   await usePdf(pdf);
   pdfDirty = true;
@@ -385,7 +387,8 @@ const handlers = {
   insets: () => {
     const narrow = innerWidth <= 800;
     const side = (prefs.strip && !narrow ? 92 : 0) + (narrow ? 70 : 86);
-    return { top: narrow ? 128 : 84, bottom: 96, left: prefs.leftHand ? 16 : side, right: prefs.leftHand ? side : 16 };
+    const panel = innerWidth > 1100 && panelOpen() ? 386 : 0; // panel kanan tidak menutupi gambar
+    return { top: narrow ? 128 : 84, bottom: 96, left: prefs.leftHand ? 16 : side, right: Math.max(prefs.leftHand ? side : 16, panel) };
   },
   tool: () => ({ input: toolInput() }),
   zoomed: (z) => { const b = $('#zoom [data-a="zfit"]'); if (b) b.textContent = `${Math.round(z * 100)}%`; updateCursor(); },
@@ -411,7 +414,7 @@ const handlers = {
   paint(g, zoom) {
     const p = project(), px = 1 / zoom, st = stages();
     const shown = p.progress.show === false ? [] : elements();
-    drawMarks(g, p, shown, st, { px, until: S.until, mode: prefs.colorMode, dates: prefs.dates, pct: prefs.pct, names: prefs.names, alpha: prefs.alpha, selected: S.selected, filter: S.filter, pop: S.pop });
+    drawMarks(g, p, shown, st, { px, until: S.until, mode: prefs.colorMode, dates: prefs.dates, pct: prefs.pct, names: prefs.names, alpha: prefs.alpha, labelTop: prefs.labelTop, period: S.period, selected: S.selected, filter: S.filter, pop: S.pop });
     if (p.annotations.show !== false) for (const a of p.annotations.items) if (a.page === S.page && a.pts.length) drawAnnotation(g, a);
     const shape = editing() && single();
     if (shape && shape.shape !== 'point') {
@@ -789,7 +792,7 @@ function renderRail(animate) {
     b.title = m.label;
     // alat panel menyala selama panelnya terbuka; Hingga tetap bertitik selama tanggal dibatasi
     b.classList.toggle('on', id === (S.panel ?? S.tool));
-    b.classList.toggle('flag', id === 'hingga' && !!S.until);
+    b.classList.toggle('flag', (id === 'hingga' && !!S.until) || (id === 'rekap' && !!S.period));
   }
   lens(rail);
   if (animate) { move(rail, [{ opacity: 0, translate: `${prefs.leftHand ? 16 : -16}px -50%` }, { opacity: 1, translate: '0 -50%' }]); $$('button', rail).forEach((b, i) => move(b, [{ opacity: 0, transform: 'scale(.7)' }, { opacity: 1, transform: 'none' }], 250, { delay: i * 28, fill: 'backwards' })); }
@@ -832,7 +835,8 @@ function renderStages() {
 function renderFloat() {
   const bar = $('#selbar');
   let html = '';
-  if (S.draft.length && S.tool !== 'skala') html = `<button data-a="draft-cancel">Batal</button><button data-a="draft-back">Hapus titik</button><button class="solid" data-a="draft-ok">${icon('check')}Selesai</button>`;
+  if (S.period && !S.selected.size && !S.draft.length) html = `<b>Disorot: ${M.shortDate(S.period.from)} – ${M.shortDate(S.period.to)}</b><button class="solid" data-a="period-off">Matikan sorot</button>`;
+  else if (S.draft.length && S.tool !== 'skala') html = `<button data-a="draft-cancel">Batal</button><button data-a="draft-back">Hapus titik</button><button class="solid" data-a="draft-ok">${icon('check')}Selesai</button>`;
   else if (editing() && S.selected.size) html = `<b>${S.selected.size} terpilih</b>${S.vertex !== null && S.selected.size === 1 ? '<button class="solid" data-a="vertex-del">Buang sudut</button>' : ''}<button class="soft" data-a="copy">Salin ke lembar</button><button data-a="element-menu" aria-label="Lainnya">${icon('more')}</button><button data-a="delete" class="warn" aria-label="Hapus">${icon('trash')}</button><button data-a="unselect" aria-label="Batal pilih">${icon('close')}</button>`;
   else if (S.selected.size) html = `<b>${S.selected.size} terpilih</b><button class="solid" data-a="date">Beri tanggal</button><button class="soft" data-a="undate">Hapus tgl</button><button data-a="element-menu" aria-label="Lainnya">${icon('more')}</button><button data-a="delete" class="warn" aria-label="Hapus">${icon('trash')}</button><button data-a="unselect" aria-label="Batal pilih">${icon('close')}</button>`;
   const was = !bar.hidden;
@@ -873,6 +877,8 @@ export function relayout() {
   for (const sel of ['#dock', '#rail', '#strip']) lens($(sel));
 }
 
+addEventListener('panelchange', () => { if (S.file) board?.refit(); });
+
 export function layout() {
   const w = $('#work');
   w.classList.toggle('lefty', prefs.leftHand);
@@ -887,7 +893,7 @@ export function layout() {
 export async function openWork(file, pdf, onHome) {
   home = onHome;
   S.file = file;
-  S.page = 0; S.mode = 'progres'; S.tool = 'pilih'; S.selected.clear(); S.until = null; S.filter = null; S.found = null; S.draft = [];
+  S.page = 0; S.mode = 'progres'; S.tool = 'pilih'; S.selected.clear(); S.until = null; S.period = null; S.filter = null; S.found = null; S.draft = [];
   history.clear();
   await usePdf(pdf);
   const app = $('#app');
@@ -917,6 +923,15 @@ export async function openWork(file, pdf, onHome) {
     move($(sel), [{ opacity: 0, translate: from }, { opacity: 1, translate: getComputedStyle($(sel)).translate === 'none' ? '0 0' : getComputedStyle($(sel)).translate }], 340, { fill: 'none' });
   }
   if (!stages().length) P.stagesDialog(true);
+  else remindBackup();
+}
+
+/** Data hanya ada di perangkat: ingatkan bila sudah lama tidak disimpan sebagai .pkp. */
+function remindBackup() {
+  const f = S.file;
+  if (!f.summary?.elements || (f.changedAt ?? 0) <= (f.backupAt ?? 0)) return;
+  const days = Math.floor((Date.now() - (f.backupAt ?? f.createdAt ?? Date.now())) / 864e5);
+  if (days >= 3) toast(f.backupAt ? `Belum dicadangkan ${days} hari` : 'Berkas ini belum pernah dicadangkan', { label: 'Simpan .pkp', run: P.savePkp });
 }
 
 export async function closeWork() {
@@ -946,6 +961,7 @@ async function onClick(e) {
     zin: () => board.zoomBy(1.5), zout: () => board.zoomBy(1 / 1.5), zfit: () => board.fit(),
     date: P.dateDialog,
     copy: P.copyDialog,
+    'period-off': () => { S.period = null; refresh(); },
     'vertex-del': removeSelectedVertex,
     undate: P.undateDialog,
     'element-menu': P.elementMenu,

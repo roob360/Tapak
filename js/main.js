@@ -11,13 +11,21 @@ const app = $('#app');
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 const isPdf = (f) => /pdf$/i.test(f.type) || /\.pdf$/i.test(f.name);
 
+function backupText(f) {
+  if (!f.summary?.elements) return '';
+  if (!f.backupAt) return 'Belum dicadangkan';
+  if ((f.changedAt ?? 0) <= f.backupAt) return 'Cadangan terbaru';
+  const days = Math.floor((Date.now() - f.backupAt) / 864e5);
+  return days ? `Ada perubahan sejak cadangan ${days} hari lalu` : 'Ada perubahan sejak cadangan hari ini';
+}
+
 async function showHome() {
   const files = (await db.listFiles()).sort((a, b) => b.updated - a.updated);
   const groups = new Map();
   for (const f of files) groups.set(f.building || 'Lainnya', [...(groups.get(f.building || 'Lainnya') ?? []), f]);
   app.innerHTML = `<main id="home">
     <header><div><h1>Tapak</h1><p>Satu berkas: satu pekerjaan, satu gedung</p></div><div class="line"><button class="soft" data-a="open">Buka proyek .pkp</button><button class="solid" data-a="new">Berkas baru</button></div></header>
-    ${[...groups].map(([building, list]) => `<h2>${esc(building)}</h2><div class="cards">${list.map((f) => `<div class="card"><button data-open="${f.id}"><span class="thumb">${f.thumb ? `<img src="${f.thumb}" alt="">` : icon('berkas')}</span><b>${esc(f.name.replace(/\.pkp$/i, ''))}</b><small>${f.summary?.sheets ?? 0} lembar · ${f.summary?.elements ?? 0} elemen</small><span class="meter"><i style="width:${f.summary?.percent ?? 0}%"></i></span><em>${f.summary?.percent ?? 0}%</em></button><button class="round soft menu" data-menu="${f.id}" aria-label="Pilihan berkas">${icon('more')}</button></div>`).join('')}</div>`).join('')
+    ${[...groups].map(([building, list]) => `<h2>${esc(building)}</h2><div class="cards">${list.map((f) => `<div class="card"><button data-open="${f.id}"><span class="thumb">${f.thumb ? `<img src="${f.thumb}" alt="">` : icon('berkas')}</span><b>${esc(f.name.replace(/\.pkp$/i, ''))}</b><small>${f.summary?.sheets ?? 0} lembar · ${f.summary?.elements ?? 0} elemen</small><span class="meter"><i style="width:${f.summary?.percent ?? 0}%"></i></span><em>${f.summary?.percent ?? 0}%</em><small class="backup">${backupText(f)}</small></button><button class="round soft menu" data-menu="${f.id}" aria-label="Pilihan berkas">${icon('more')}</button></div>`).join('')}</div>`).join('')
       || '<div class="empty"><p>Belum ada berkas.</p><p>Buat dari PDF denah atau foto gambar, atau buka proyek <b>.pkp</b> dari PDFKill.</p></div>'}
     <p class="note">Data tersimpan di perangkat ini. Simpan .pkp secara berkala sebagai cadangan.</p>
   </main>`;
@@ -69,7 +77,7 @@ async function create(name, building, pdf, project) {
   const thumb = (await view.render(0, 240)).toDataURL('image/jpeg', 0.7);
   const sheets = view.pages;
   await view.close();
-  const file = { id: uid(), name, building, project, thumb, updated: Date.now(), summary: { sheets, elements: project.progress.items.length, percent: 0 } };
+  const file = { id: uid(), name, building, project, thumb, updated: Date.now(), createdAt: Date.now(), summary: { sheets, elements: project.progress.items.length, percent: 0 } };
   await db.putBoth(file, pdf);
   navigator.storage?.persist?.();
   await open(file.id);

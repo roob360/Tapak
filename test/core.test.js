@@ -7,6 +7,7 @@ import * as M from '../js/model.js';
 import { warp, homography, apply, rotation, skewAngle } from '../js/warp.js';
 import { findRoom, findSimilar, binarize, crop } from '../js/auto.js';
 import { toXlsx, col } from '../js/export.js';
+import { week, shift, periodReport, volumes } from '../js/report.js';
 
 function sample() {
   const p = P.emptyProject('a.pdf', 3);
@@ -160,4 +161,23 @@ test('ubah bentuk dan salin ke lembar lain tanpa tanggal', () => {
   assert.equal(copy.st, undefined);
   assert.equal(M.copyElements(p, source, [2], sizes), 0);
   assert.ok(p.progress.sheets[2]);
+});
+
+test('progres periode dan volume per tahap', () => {
+  assert.deepEqual(week('2026-11-26'), { from: '2026-11-23', to: '2026-11-29' });
+  assert.deepEqual(week('2026-11-29', 1), { from: '2026-11-16', to: '2026-11-22' });
+  assert.equal(shift('2026-12-31', 1), '2027-01-01');
+  const p = sample();
+  const st = p.progress.sheets[0].stages;
+  M.mark(st, p.progress.items[0], 's3', '2026-11-24');
+  const r = periodReport(p, 3, '2026-11-23', '2026-11-29');
+  assert.equal(r.rows[0].total, 1);
+  assert.ok(r.rows[0].after > r.rows[0].before);
+  p.progress.sheets[1] = { work: 'x', stages: M.makeStages(['Besi']) };
+  M.mark(p.progress.sheets[1].stages, p.progress.items[1], 's1', '2026-11-24');
+  p.takeoff.scales = { 1: 0.1 };
+  const v = volumes(p, 3);
+  assert.equal(v.rows.find((x) => x.name === 'Besi').length, 5);
+  assert.equal(v.unscaled, false);
+  assert.ok(new TextDecoder().decode(toXlsx(p, ['a', 'b', 'c'])).includes('SUMIF'));
 });

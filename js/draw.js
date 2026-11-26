@@ -25,7 +25,8 @@ export function drawMarks(g, project, els, stages, o) {
     const sel = o.selected?.has(el.id);
     const pop = o.pop?.get(el.id) ?? 0; // denyut sesaat sesudah ditandai (0..1)
     g.save();
-    g.globalAlpha = o.filter && !el.st?.[o.filter] ? 0.15 : 1;
+    const outside = o.period && !Object.values(el.st ?? {}).some((d) => d >= o.period.from && d <= o.period.to);
+    g.globalAlpha = outside || (o.filter && !el.st?.[o.filter]) ? 0.15 : 1;
     g.lineJoin = g.lineCap = 'round';
     const [cx, cy] = center(el);
     if (pop) { const k = 1 + pop * 0.35; g.translate(cx, cy); g.scale(k, k); g.translate(-cx, -cy); }
@@ -61,7 +62,8 @@ export function drawMarks(g, project, els, stages, o) {
     if (color) {
       const last = lastStage(stages, el, o.until);
       const text = [o.names === false ? '' : el.label, o.dates ? shortDate(el.st[last.id]) : '', o.pct ? `${percent(stages, el, o.until)}%` : ''].filter(Boolean).join(' · ');
-      if (text) label(g, text, el.shape === 'point' ? cx + r + 3 * px : cx, el.shape === 'point' ? cy - r : cy, px, el.shape === 'point' ? 'left' : 'center');
+      const top = o.labelTop && el.shape === 'poly' ? Math.min(...el.pts.map((q) => q[1])) + 11 * px : cy; // tepi atas area agar nama ruangan di gambar tetap terbaca
+      if (text) label(g, text, el.shape === 'point' ? cx + r + 3 * px : cx, el.shape === 'point' ? cy - r : el.shape === 'line' ? cy - 11 * px : top, px, el.shape === 'point' ? 'left' : 'center');
     } else if (el.label && o.names !== false) label(g, el.label, cx, cy, px, 'center');
     g.restore();
   }
