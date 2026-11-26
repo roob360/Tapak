@@ -12,6 +12,7 @@ const I = {
   pilih: 'M3 8V3h5M16 3h5v5M21 16v5h-5M8 21H3v-5M10 3h4M10 21h4M3 10v4M21 10v4', kuas: 'M4 4h10l2 2v6M4 4v16h7M13 18l3 3 6-7', elemen: 'M9 6h11M9 12h11M9 18h11M4 6h1M4 12h1M4 18h1', hingga: 'M4 5h16v16H4zM4 10h16M8 3v4M16 3v4M8 14h3v3H8z', rekap: 'M5 2h10l4 4v16H5zM8 11h8v7H8zM8 14.5h8M12 11v7',
   legenda: 'M3 4h18v16H3zM7 9h2M12 9h5M7 15h2M12 15h5',
   lurus: 'M3 7l17-3 1 13-17 3zM7 12h10M12 9v6',
+  ubah: 'M3 3h6v6H3zM15 15h6v6h-6zM9 6h6v9M6 9v9h9',
   mata: 'M2 12l5-6h10l5 6-5 6H7zM10 9h4l1 2v2l-1 2h-4l-1-2v-2z', trash: 'M4 7h16M9 7V4h6v3M6 7l1 14h10l1-14M10 11v6M14 11v6', salin: 'M9 8h11v13H9zM4 16V3h11v2', putar: 'M19 8l-3-3H8l-4 4v7l4 4h8l3-3M19 3v5h-5', foto: 'M3 7h4l2-3h6l2 3h4v13H3zM12 10a4 4 0 100 8 4 4 0 000-8z', berkas: 'M5 2h10l4 4v16H5zM15 2v4h4', panel: 'M3 4h18v16H3zM9 4v16M5 8h2M5 11h2', geser: 'M12 3v18M3 12h18M9 6l3-3 3 3M9 18l3 3 3-3',
 };
 export const icon = (n) => `<svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="${I[n] ?? ''}"/></svg>`;

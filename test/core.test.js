@@ -140,3 +140,24 @@ test('kemiringan scan terdeteksi dan titik ikut berputar', () => {
   const back = P.transformPage(P.transformPage(p, 0, rotation(5, 100, 100)), 0, rotation(-5, 100, 100));
   assert.ok(Math.abs(back.progress.items[0].pts[0][0] - 10) < 0.05);
 });
+
+test('ubah bentuk dan salin ke lembar lain tanpa tanggal', () => {
+  const p = sample();
+  const line = p.progress.items[1];
+  M.moveElement(line, 5, 5);
+  assert.deepEqual(line.pts, [[5, 5], [55, 5]]);
+  M.insertVertex(line, 0, [30, 20]);
+  assert.equal(line.pts.length, 3);
+  assert.equal(M.removeVertex(line, 1), true);
+  assert.equal(M.removeVertex(line, 0), false);
+  const sizes = [[100, 100], [100, 100], [200, 200]];
+  const source = p.progress.items.filter((e) => e.page === 0);
+  assert.equal(M.copyElements(p, source, [0, 2], sizes), 1);
+  const copy = p.progress.items.at(-1);
+  assert.equal(copy.page, 2);
+  assert.deepEqual(copy.pts, [[20, 40]]);
+  assert.equal(copy.date, null);
+  assert.equal(copy.st, undefined);
+  assert.equal(M.copyElements(p, source, [2], sizes), 0);
+  assert.ok(p.progress.sheets[2]);
+});

@@ -151,3 +151,41 @@ export function createHistory(limit = 60) {
     get canRedo() { return future.length > 0; },
   };
 }
+
+const round2 = ([x, y]) => [Math.round(x * 100) / 100, Math.round(y * 100) / 100];
+export function moveElement(el, dx, dy) { el.pts = el.pts.map(([x, y]) => round2([x + dx, y + dy])); }
+export function moveVertex(el, i, p) { el.pts[i] = round2(p); }
+/** Sudut baru di antara titik i dan i+1. */
+export function insertVertex(el, i, p) { el.pts.splice(i + 1, 0, round2(p)); }
+export function removeVertex(el, i) {
+  if (el.pts.length <= (el.shape === 'poly' ? 3 : 2)) return false;
+  el.pts.splice(i, 1);
+  return true;
+}
+
+/**
+ * Salin elemen ke lembar lain sebagai elemen baru tanpa tanggal. `sizes` menyesuaikan bila ukuran lembar berbeda.
+ * Elemen yang sudah ada di tempat yang sama dilewati. Return jumlah yang dibuat.
+ */
+export function copyElements(p, els, pages, sizes) {
+  let made = 0;
+  for (const page of pages) {
+    for (const el of els) {
+      if (page === el.page) continue;
+      const kx = sizes[page][0] / sizes[el.page][0], ky = sizes[page][1] / sizes[el.page][1];
+      const pts = el.pts.map(([x, y]) => round2([x * kx, y * ky]));
+      const [cx, cy] = center({ ...el, pts });
+      const taken = allElements(p, page).some((o) => { const [x, y] = center(o); return o.shape === el.shape && Math.hypot(x - cx, y - cy) < 3; });
+      if (taken) continue;
+      addElement(p, {
+        page, shape: el.shape, pts,
+        ...(el.shape === 'point' ? { r: (el.r ?? 9) * kx, style: el.style ?? 'kotak' } : {}),
+        ...(el.w ? { w: el.w } : {}), ...(el.label ? { label: el.label } : {}),
+      });
+      made++;
+    }
+    const from = els[0] && p.progress.sheets[els[0].page];
+    if (from && !p.progress.sheets[page]) p.progress.sheets[page] = structuredClone(from);
+  }
+  return made;
+}

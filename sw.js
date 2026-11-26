@@ -1,5 +1,5 @@
 // Jalan offline: jaringan dulu (pembaruan langsung sampai), cadangan dari cache.
-const CACHE = 'tapak-v5';
+const CACHE = 'tapak-v6';
 const FILES = [
   './', 'index.html', 'app.css', 'manifest.webmanifest', 'icons/icon.svg', 'icons/icon-192.png',
   ...['main', 'work', 'panels', 'board', 'draw', 'model', 'pkp', 'geom', 'auto', 'worker', 'pdf', 'store', 'export', 'ui', 'crop', 'warp', 'pick', 'deskew', 'cursor'].map((n) => `js/${n}.js`),

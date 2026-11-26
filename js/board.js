@@ -160,8 +160,8 @@ export function createBoard(canvas, h) {
     // tombol samping pen atau klik kanan: roda pen / menu
     if (e.button === 2 || (type === 'pen' && e.buttons & 2)) { h.menu(p, toWorld(p), type); return; }
 
-    const grabbed = e.button === 0 && h.grab(toWorld(p), type);
-    if (grabbed) { act = { id: e.pointerId, kind: 'legend', start: p, last: p, moved: false, slop: 4 }; return; }
+    const grabbed = e.button === 0 && h.grab(toWorld(p), type, type !== 'touch' || !state.penSeen || state.finger);
+    if (grabbed) { act = { id: e.pointerId, kind: 'legend', start: p, last: p, type, moved: false, slop: type === 'touch' ? 10 : 4 }; return; }
     const tool = h.tool();
     const eraserTip = e.button === 5 || (e.buttons & 32) !== 0;
     const mode = eraserTip ? 'erase' : tool.input;
@@ -219,7 +219,7 @@ export function createBoard(canvas, h) {
       if (act.moved && act.type === 'mouse') canvas.style.cursor = 'grabbing';
       if (act.moved) set(clamp({ k: view.k, x: view.x + p[0] - act.last[0], y: view.y + p[1] - act.last[1] }));
     } else if (act.kind === 'place') aim(p, act.type);
-    else if (act.kind === 'legend') h.grabMove(toWorld(p));
+    else if (act.kind === 'legend') { if (act.moved) h.grabMove(toWorld(p)); }
     else {
       const list = e.getCoalescedEvents?.() ?? [];
       for (const ev of list.length ? list : [e]) {
@@ -253,7 +253,7 @@ export function createBoard(canvas, h) {
     cache = null;
     state.loupe = null;
     if (cancelled) h.cancel();
-    else if (a.kind === 'legend') h.grabEnd(a.moved);
+    else if (a.kind === 'legend') h.grabEnd(a.moved, w, a.type);
     else if (a.kind === 'draw' || a.kind === 'box') h.end(w, a.moved, a.type);
     else if (a.kind === 'erase') h.eraseEnd();
     else if (a.kind === 'paint') h.paintEnd();

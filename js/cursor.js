@@ -36,7 +36,7 @@ export function cursorFor(o) {
     // pena: bulatan sebesar dan sewarna goresan
     return ring(Math.max(5, Math.min(56, Math.round(o.size))), o.color, false);
   }
-  if (tool === 'pilih') return o.over === 'element' ? 'pointer' : 'default';
+  if (tool === 'pilih') return o.over === 'handle' ? 'grab' : o.over === 'element' ? (o.movable ? 'move' : 'pointer') : 'default';
   if (tool === 'kuas') return tip('kuas', 6, 24);
   if (tool === 'bebas') return tip('pulpen', 4, 24);
   const names = { titik: 'titik', garis: 'garis', area: 'area', kotak: 'kotak', bulat: 'bulat', cari: 'cari', ruang: 'ruang', skala: 'skala' };

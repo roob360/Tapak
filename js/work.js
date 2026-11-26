@@ -14,14 +14,14 @@ import { $, $$, icon, esc, toast, form, choose, move, finished, wheel, closeWhee
 const MODES = [['gambar', 'Gambar'], ['petakan', 'Petakan'], ['otomatis', 'Otomatis'], ['progres', 'Progres']];
 const TOOLS = {
   gambar: [['fav0'], ['fav1'], ['fav2'], ['awan', 'Awan', 'drag'], ['catatan', 'Nota', 'place'], ['stempel', 'Cap', 'place'], ['hapus', 'Hapus', 'erase'], ['kuasset', 'Semua', 'action']],
-  petakan: [['titik', 'Titik', 'place'], ['garis', 'Garis', 'place'], ['area', 'Area', 'place'], ['kotak', 'Kotak', 'drag'], ['bulat', 'Bulat', 'drag'], ['bebas', 'Bebas', 'draw'], ['pilih', 'Pilih', 'drag']],
+  petakan: [['titik', 'Titik', 'place'], ['garis', 'Garis', 'place'], ['area', 'Area', 'place'], ['kotak', 'Kotak', 'drag'], ['bulat', 'Bulat', 'drag'], ['bebas', 'Bebas', 'draw'], ['pilih', 'Ubah', 'drag'], ['salin', 'Salin', 'action']],
   otomatis: [['cari', 'Cari', 'drag'], ['ruang', 'Ruang', 'place'], ['nomor', 'Nomor', 'action'], ['skala', 'Skala', 'place'], ['sisi', 'Sisi', 'action'], ['lurus', 'Lurus', 'action']],
   progres: [['pilih', 'Pilih', 'drag'], ['kuas', 'Kuas', 'paint'], ['elemen', 'Elemen', 'action'], ['hingga', 'Hingga', 'action'], ['legenda', 'Legenda', 'action'], ['rekap', 'Rekap', 'action']],
 };
 const KEYS = { v: ['progres', 'pilih'], t: ['petakan', 'titik'], g: ['petakan', 'garis'], a: ['petakan', 'area'], k: ['petakan', 'kotak'], r: ['otomatis', 'ruang'], s: ['otomatis', 'cari'], c: ['gambar', 'fav0'], b: ['progres', 'kuas'] };
 const HINT = {
   titik: 'Ketuk untuk menaruh titik. Tahan lalu geser untuk membidik.', garis: 'Ketuk tiap sudut, lalu Selesai.', area: 'Ketuk tiap sudut, ketuk titik awal atau Selesai.',
-  kotak: 'Tarik dari sudut ke sudut.', bulat: 'Tarik dari pusat ke tepi.', bebas: 'Gambar mengikuti elemen. Tahan di akhir untuk merapikan.', pilih: 'Ketuk elemen atau tarik kotak.',
+  kotak: 'Tarik dari sudut ke sudut.', bulat: 'Tarik dari pusat ke tepi.', bebas: 'Gambar mengikuti elemen. Tahan di akhir untuk merapikan.', pilih: 'Ketuk elemen atau tarik kotak.', ubah: 'Pilih elemen, lalu geser badannya atau tarik sudutnya.',
   kuas: 'Pilih tahap di atas, lalu ketuk atau sapu elemen.', cari: 'Tarik kotak di sekeliling SATU contoh.', ruang: 'Ketuk bagian kosong di dalam ruangan.', skala: 'Ketuk dua titik yang jaraknya diketahui.',
   catatan: 'Ketuk untuk menaruh catatan.', stempel: 'Ketuk untuk menaruh stempel.', awan: 'Tarik kotak mengelilingi bagian yang direvisi.',
 };
@@ -43,7 +43,7 @@ export function applyTheme() { document.documentElement.dataset.theme = prefs.th
 /** Keadaan lembar kerja yang sedang terbuka. */
 export const S = {
   file: null, pdf: null, view: null, names: [], page: 0, mode: 'progres', tool: 'pilih', fav: 0, stage: null, selected: new Set(),
-  filter: null, until: null, legendDrag: null, panel: null, draft: [], cursor: null, drag: null, stroke: null, found: null, pop: new Map(), legendBox: null,
+  filter: null, until: null, legendDrag: null, editDrag: null, vertex: null, panel: null, draft: [], cursor: null, drag: null, stroke: null, found: null, pop: new Map(), legendBox: null,
 };
 const history = M.createHistory();
 let hintTimer = 0;
@@ -205,13 +205,13 @@ export function setMode(mode, tool) {
   renderRail(true);
   refresh();
 }
-function resetTool() { S.panel = null; S.draft = []; S.found = null; S.cursor = null; S.drag = null; closeWheel(); }
+function resetTool() { S.vertex = null; S.panel = null; S.draft = []; S.found = null; S.cursor = null; S.drag = null; closeWheel(); }
 export async function setTool(id) {
   const action = TOOLS[S.mode].find((t) => t[0] === id)?.[2] === 'action';
   if (action) {
     S.panel = id;
     renderRail();
-    const open = ({ kuasset: P.brushes, elemen: P.elementsPanel, hingga: () => P.viewPanel('hingga'), legenda: P.viewPanel, rekap: P.recap, nomor: P.autoNumber, sisi: P.splitSides, lurus: straightenDialog })[id];
+    const open = ({ kuasset: P.brushes, elemen: P.elementsPanel, hingga: () => P.viewPanel('hingga'), legenda: P.viewPanel, rekap: P.recap, nomor: P.autoNumber, sisi: P.splitSides, lurus: straightenDialog, salin: P.copyDialog })[id];
     const result = await open();
     await result?.closed;
     if (S.panel === id) { S.panel = null; if (S.file) renderRail(); }
@@ -318,6 +318,8 @@ function overWhat(p) {
     if (S.mode === 'progres' && Math.hypot(p[0] - L.x - L.w, p[1] - L.y - L.h) <= reach) return 'size';
     if (p[0] >= L.x && p[0] <= L.x + L.w && p[1] >= L.y && p[1] <= L.y + L.h) return 'legend';
   }
+  const shape = editing() && single();
+  if (shape && shape.shape !== 'point' && [...shape.pts, ...midpoints(shape)].some((q) => G.dist(p, q) <= reach)) return 'handle';
   if (S.found) return S.found.list.some((c) => c.page === S.page && p[0] >= c.x && p[0] <= c.x + c.w && p[1] >= c.y && p[1] <= c.y + c.h) ? 'element' : null;
   return (S.tool === 'pilih' || S.tool === 'kuas') && hit(p, 'mouse') ? 'element' : null;
 }
@@ -325,8 +327,58 @@ export function updateCursor() {
   const canvas = $('#plan');
   if (!canvas || !board || !S.file) return;
   const f = favorite();
-  const next = cursorFor({ mode: S.mode, tool: S.tool, brush: f.brush, color: f.color, size: f.size * board.view.k, over: overWhat(pointerAt), found: !!S.found });
+  const next = cursorFor({ mode: S.mode, tool: S.tool, brush: f.brush, color: f.color, size: f.size * board.view.k, over: overWhat(pointerAt), found: !!S.found, movable: editing() && !!pointerAt && S.selected.has(hit(pointerAt, 'mouse')?.id) });
   if (canvas.dataset.cursor !== next) { canvas.dataset.cursor = next; canvas.style.cursor = next; }
+}
+
+export const editing = () => S.mode === 'petakan' && S.tool === 'pilih';
+const single = () => (S.selected.size === 1 ? selected()[0] : null);
+const midpoints = (el) => el.pts.slice(0, el.shape === 'poly' ? el.pts.length : -1).map((a, i) => { const b = el.pts[(i + 1) % el.pts.length]; return [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2]; });
+
+function grabElement(p, type) {
+  if (!S.selected.size) return false;
+  const reach = (type === 'touch' ? 20 : 10) / board.view.k;
+  const one = single();
+  const before = snap();
+  if (one && one.shape !== 'point') {
+    let index = one.pts.findIndex((q) => G.dist(p, q) <= reach);
+    if (index >= 0) { S.editDrag = { kind: 'vertex', id: one.id, index, before }; return true; }
+    index = midpoints(one).findIndex((q) => G.dist(p, q) <= reach);
+    if (index >= 0) {
+      const real = M.realize(project(), one);
+      M.insertVertex(real, index, p);
+      S.selected = new Set([real.id]);
+      S.editDrag = { kind: 'vertex', id: real.id, index: index + 1, before };
+      return true;
+    }
+  }
+  const under = hit(p, type);
+  if (!under || !S.selected.has(under.id)) return false;
+  S.editDrag = { kind: 'move', last: p, before, realized: false };
+  return true;
+}
+function moveGrabbed(p) {
+  const d = S.editDrag;
+  if (d.kind === 'vertex') {
+    const el = elements().find((e) => e.id === d.id);
+    if (!el) return;
+    S.vertex = d.index;
+    M.moveVertex(el, d.index, p);
+  } else {
+    if (!d.realized) { // kandidat yang digeser menjadi penanda nyata
+      S.selected = new Set(selected().map((e) => M.realize(project(), e).id));
+      d.realized = true;
+    }
+    for (const el of selected()) M.moveElement(el, p[0] - d.last[0], p[1] - d.last[1]);
+    d.last = p;
+  }
+  board.redraw();
+}
+export function removeSelectedVertex() {
+  const el = single();
+  if (!el || S.vertex === null) return;
+  if (el.pts.length <= (el.shape === 'poly' ? 3 : 2)) return toast('Sudut sudah paling sedikit');
+  change(() => { M.removeVertex(elements().find((e) => e.id === el.id), S.vertex); S.vertex = null; });
 }
 
 const handlers = {
@@ -361,6 +413,12 @@ const handlers = {
     const shown = p.progress.show === false ? [] : elements();
     drawMarks(g, p, shown, st, { px, until: S.until, mode: prefs.colorMode, dates: prefs.dates, pct: prefs.pct, names: prefs.names, alpha: prefs.alpha, selected: S.selected, filter: S.filter, pop: S.pop });
     if (p.annotations.show !== false) for (const a of p.annotations.items) if (a.page === S.page && a.pts.length) drawAnnotation(g, a);
+    const shape = editing() && single();
+    if (shape && shape.shape !== 'point') {
+      const dot = ([x, y], r, fill) => { g.beginPath(); g.arc(x, y, r * px, 0, Math.PI * 2); g.fillStyle = fill; g.fill(); g.lineWidth = 2 * px; g.strokeStyle = '#1c1c1e'; g.stroke(); };
+      for (const [i, q] of shape.pts.entries()) dot(q, 7, i === S.vertex ? '#ff8d28' : '#fff');
+      for (const mid of midpoints(shape)) dot(mid, 4, '#34c759');
+    }
     S.legendBox = drawLegend(g, p, S.page, M.summary(p, S.page, S.until), { unit: legendUnit(), mode: prefs.colorMode, until: S.until, elements: shown, page: S.view.sizes[S.page], handle: S.mode === 'progres' ? px : 0 });
     for (const c of S.found?.list ?? []) {
       if (c.page !== S.page) continue;
@@ -403,8 +461,9 @@ const handlers = {
     }
     g.restore();
   },
-  /** Legenda: seret badannya untuk memindah, bulatan di sudut untuk mengubah ukuran. */
-  grab(p, type) {
+  /** Pegangan: sudut atau badan elemen (alat Ubah), dan legenda. */
+  grab(p, type, may) {
+    if (may && editing() && grabElement(p, type)) return true;
     const L = S.legendBox;
     if (!L || S.found || S.draft.length || S.mode === 'gambar') return false;
     const reach = (type === 'touch' ? 22 : 12) / board.view.k;
@@ -414,6 +473,7 @@ const handlers = {
     return true;
   },
   grabMove(p) {
+    if (S.editDrag) return moveGrabbed(p);
     const d = S.legendDrag;
     if (!d) return;
     const legend = project().progress.legend;
@@ -424,7 +484,16 @@ const handlers = {
     } else legend.pos[S.page] = [d.box.x + p[0] - d.a[0], d.box.y + p[1] - d.a[1]];
     board.redraw();
   },
-  grabEnd(moved) {
+  grabEnd(moved, p, type) {
+    if (S.editDrag) {
+      const d = S.editDrag;
+      S.editDrag = null;
+      if (moved) { history.push(d.before); save(); return refresh(); }
+      // ketukan tanpa geser: sudut dipilih (untuk dibuang), atau pilihan elemen diubah seperti biasa
+      S.file.project = JSON.parse(d.before.json);
+      if (d.kind === 'vertex') { S.vertex = d.index; return refresh(); }
+      return handlers.tap(p, type);
+    }
     const d = S.legendDrag;
     S.legendDrag = null;
     if (d && moved) { history.push(d.before); save(); }
@@ -527,6 +596,7 @@ const handlers = {
   cancel() {
     if (S.paint) { S.file.project = JSON.parse(S.paint.before.json); S.paint = null; }
     if (S.legendDrag) { S.file.project = JSON.parse(S.legendDrag.before.json); S.legendDrag = null; }
+    if (S.editDrag) { S.file.project = JSON.parse(S.editDrag.before.json); S.editDrag = null; }
     if (erasing) { S.file.project = JSON.parse(erasing.json); erasing = null; }
     S.stroke = null; S.drag = null; S.cursor = null;
     board?.redraw();
@@ -542,6 +612,7 @@ const handlers = {
     }
     const t = S.tool;
     if (t === 'pilih') {
+      S.vertex = null;
       const el = hit(p, type);
       if (!el) S.selected.clear();
       else if (S.selected.has(el.id)) S.selected.delete(el.id);
@@ -693,7 +764,7 @@ export function cancelFound() { S.found = null; board.redraw(); refresh(); }
 
 /* ---------- tampilan ---------- */
 function toolMeta(id, label) {
-  if (!id.startsWith('fav')) return { label, svg: icon(id === 'kuasset' ? 'more' : id) };
+  if (!id.startsWith('fav')) return { label, svg: icon(id === 'kuasset' ? 'more' : label === 'Ubah' ? 'ubah' : id) };
   const f = prefs.favorites[+id.slice(3)];
   return { label: f.name, svg: `<svg class="i" viewBox="0 0 24 24"><path d="M3 15c4-8 7 4 11-1s4-6 7-5" style="stroke:${f.color === '#1c1c1e' ? 'currentColor' : f.color};stroke-width:${f.brush === 'stabilo' ? 7 : 2.5};opacity:${f.brush === 'stabilo' ? 0.7 : 1}"/></svg>` };
 }
@@ -762,6 +833,7 @@ function renderFloat() {
   const bar = $('#selbar');
   let html = '';
   if (S.draft.length && S.tool !== 'skala') html = `<button data-a="draft-cancel">Batal</button><button data-a="draft-back">Hapus titik</button><button class="solid" data-a="draft-ok">${icon('check')}Selesai</button>`;
+  else if (editing() && S.selected.size) html = `<b>${S.selected.size} terpilih</b>${S.vertex !== null && S.selected.size === 1 ? '<button class="solid" data-a="vertex-del">Buang sudut</button>' : ''}<button class="soft" data-a="copy">Salin ke lembar</button><button data-a="element-menu" aria-label="Lainnya">${icon('more')}</button><button data-a="delete" class="warn" aria-label="Hapus">${icon('trash')}</button><button data-a="unselect" aria-label="Batal pilih">${icon('close')}</button>`;
   else if (S.selected.size) html = `<b>${S.selected.size} terpilih</b><button class="solid" data-a="date">Beri tanggal</button><button class="soft" data-a="undate">Hapus tgl</button><button data-a="element-menu" aria-label="Lainnya">${icon('more')}</button><button data-a="delete" class="warn" aria-label="Hapus">${icon('trash')}</button><button data-a="unselect" aria-label="Batal pilih">${icon('close')}</button>`;
   const was = !bar.hidden;
   if (!html) {
@@ -788,7 +860,7 @@ export function refresh() {
   renderFloat();
   updatePercents();
   $('[data-a="redo"]').disabled = !history.canRedo;
-  const hint = $('#hint'), text = S.found ? 'Ketuk kotak untuk membuang atau menyertakan. Tarik kotak untuk menambah contoh.' : S.mode !== 'gambar' ? HINT[S.tool] ?? '' : HINT[S.tool] ?? '';
+  const hint = $('#hint'), text = S.found ? 'Ketuk kotak untuk membuang atau menyertakan. Tarik kotak untuk menambah contoh.' : (editing() ? HINT.ubah : HINT[S.tool] ?? '');
   if (hint.textContent !== text) { hint.textContent = text; hint.hidden = !text; clearTimeout(hintTimer); if (text) { move(hint, [{ opacity: 0, translate: '-50% -6px' }, { opacity: 1, translate: '-50% 0' }]); hintTimer = setTimeout(() => finished(move(hint, [{ opacity: 1 }, { opacity: 0 }], 340)).then(() => { hint.hidden = true; }), 5000); } }
   P.refresh();
   board.redraw();
@@ -873,6 +945,8 @@ async function onClick(e) {
     strip: () => { prefs.strip = !prefs.strip; savePrefs(); layout(); },
     zin: () => board.zoomBy(1.5), zout: () => board.zoomBy(1 / 1.5), zfit: () => board.fit(),
     date: P.dateDialog,
+    copy: P.copyDialog,
+    'vertex-del': removeSelectedVertex,
     undate: P.undateDialog,
     'element-menu': P.elementMenu,
     delete: () => deleteSelected(),
@@ -902,7 +976,7 @@ export function key(e) {
   if (isOpen()) return;
   if (k === 'enter') { e.preventDefault(); if (S.draft.length) finishDraft(); else if (S.selected.size) P.dateDialog(); }
   else if ((k === 'delete' || k === 'backspace') && S.draft.length) { S.draft.pop(); refresh(); }
-  else if (k === 'delete') deleteSelected();
+  else if (k === 'delete') { if (editing() && S.vertex !== null && S.selected.size === 1) removeSelectedVertex(); else deleteSelected(); }
   else if (k === 'pageup') showPage(S.page - 1, -1);
   else if (k === 'pagedown') showPage(S.page + 1, 1);
   else if (KEYS[k]) setMode(...KEYS[k]);

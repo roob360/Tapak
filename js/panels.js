@@ -127,9 +127,10 @@ export async function undateDialog() {
 }
 export async function elementMenu() {
   const id = await choose('Elemen terpilih', [
-    { id: 'number', label: 'Nomori berurutan', icon: 'nomor' }, { id: 'split', label: 'Pecah jadi dua sisi', icon: 'sisi' },
+    { id: 'copy', label: 'Salin ke lembar lain', icon: 'salin' }, { id: 'number', label: 'Nomori berurutan', icon: 'nomor' }, { id: 'split', label: 'Pecah jadi dua sisi', icon: 'sisi' },
     { id: 'undated', label: 'Pilih yang belum bertanggal', icon: 'pilih' }, { id: 'all', label: 'Pilih semua', icon: 'pilih' }, { id: 'list', label: 'Daftar dan rincian', icon: 'elemen' },
   ]);
+  if (id === 'copy') copyDialog();
   if (id === 'number') autoNumber();
   if (id === 'split') splitSides();
   if (id === 'undated') selectWhere((e) => !e.date);
@@ -156,6 +157,46 @@ export async function splitSides() {
   if (!(gap > 0)) return;
   S.selected.clear();
   change(() => { for (const el of list) M.splitSides(project(), el, m ? gap / 100 / m : gap); });
+}
+
+/* ---------- salin ke lembar lain ---------- */
+export function copyDialog() {
+  const list = S.selected.size ? W.selected() : W.elements();
+  if (!list.length) return toast('Lembar ini belum punya elemen');
+  if (S.view.pages < 2) return toast('Berkas hanya punya satu lembar. Tambah lewat Kelola lembar.');
+  const others = Array.from({ length: S.view.pages }, (_, i) => i).filter((i) => i !== S.page);
+  const chosen = new Set();
+  const s = sheet({
+    title: 'Salin ke lembar lain', sub: `${list.length} elemen${S.selected.size ? ' terpilih' : ' (semua di lembar ini)'}, tanpa tanggal`,
+    body: `<div class="chips">${others.map((i) => `<button class="soft" data-page="${i}" aria-pressed="false">${esc(W.sheetName(i))}</button>`).join('')}</div>
+      <button class="link" data-all>Pilih semua lembar</button>
+      <div class="pair"><button class="soft" data-no>Batal</button><button class="solid" data-go disabled>Salin</button></div>`,
+  });
+  const paint = () => {
+    for (const b of $$('[data-page]', s.el)) {
+      const on = chosen.has(+b.dataset.page);
+      b.classList.toggle('solid', on);
+      b.classList.toggle('soft', !on);
+      b.setAttribute('aria-pressed', on);
+    }
+    const go = $('[data-go]', s.el);
+    go.disabled = !chosen.size;
+    go.textContent = chosen.size ? `Salin ke ${chosen.size} lembar` : 'Salin';
+  };
+  s.el.addEventListener('click', (e) => {
+    const b = e.target.closest('button');
+    if (!b) return;
+    if (b.dataset.page !== undefined) { const i = +b.dataset.page; if (chosen.has(i)) chosen.delete(i); else chosen.add(i); paint(); }
+    if ('all' in b.dataset) { others.forEach((i) => chosen.add(i)); paint(); }
+    if ('no' in b.dataset) s.close();
+    if ('go' in b.dataset) {
+      let made = 0;
+      change(() => { made = M.copyElements(project(), list, [...chosen], S.view.sizes); });
+      s.close();
+      toast(made ? `${made} elemen disalin ke ${chosen.size} lembar` : 'Tidak ada yang disalin: elemen sudah ada di sana', made ? { label: 'Urungkan', run: W.undo } : undefined);
+    }
+  });
+  return s;
 }
 
 /* ---------- tahap ---------- */

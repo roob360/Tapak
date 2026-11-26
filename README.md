@@ -32,6 +32,7 @@ Berkas baru di `js/` harus ditambahkan ke daftar di `sw.js`.
 ## Belum ada
 
 - Hapus coretan sebagian (baru per goresan); geser dan ubah catatan, cap, atau awan yang sudah ditaruh.
+  (Elemen progres sudah bisa digeser dan diubah sudutnya dengan alat Ubah di mode Petakan.)
 - Urutkan lembar dengan seret (sekarang tombol geser kiri / kanan).
 - Deteksi sudut kertas otomatis pada koreksi foto.
 - Impor skala dari teks gambar, OCR, deteksi grid.
